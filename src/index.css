@@ -2,95 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
+/* POLIVERSO Design System - Dark Mode Operacional
+   Sistema POS de alta rotación para parques de diversiones
+   Prioridad: Velocidad > Estética, Claridad > Creatividad
 */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* === Colores Base (Light mode - no usado, pero definido) === */
+    --background: 220 14% 96%;
+    --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 215 20% 65%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 263 70% 58%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
 
-    --sidebar-background: 0 0% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --radius: 0.75rem;
 
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* === Tokens Operacionales === */
+    --surface: 0 0% 100%;
+    --surface-foreground: 222 47% 11%;
+    --surface-elevated: 0 0% 98%;
+    
+    /* Sombras y efectos */
+    --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.5);
+    --shadow-success: 0 0 15px rgba(16, 185, 129, 0.4);
+    --shadow-danger: 0 0 15px rgba(239, 68, 68, 0.4);
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    /* === Dark Mode Operacional - Modo Principal === */
+    --background: 222 47% 6%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 217 33% 12%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 217 33% 12%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 263 70% 58%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 217 91% 60%;
+
+    /* === Tokens Operacionales Dark === */
+    --surface: 217 33% 12%;
+    --surface-foreground: 210 40% 98%;
+    --surface-elevated: 217 33% 17%;
   }
 }
 
@@ -99,7 +108,274 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    @apply dark;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* Scrollbar personalizado para POS */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: hsl(217 33% 25%);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer components {
+  /* === Botones POS - Grandes y Touch-Friendly === */
+  .btn-pos {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold text-lg
+           px-6 py-4 min-h-[56px] transition-all duration-200
+           focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-pos-primary {
+    @apply btn-pos bg-primary text-primary-foreground hover:bg-primary/90
+           shadow-lg shadow-primary/30;
+  }
+
+  .btn-pos-success {
+    @apply btn-pos bg-success text-success-foreground hover:bg-success/90
+           shadow-lg shadow-success/30;
+  }
+
+  .btn-pos-danger {
+    @apply btn-pos bg-destructive text-destructive-foreground hover:bg-destructive/90
+           shadow-lg shadow-destructive/30;
+  }
+
+  .btn-pos-warning {
+    @apply btn-pos bg-warning text-warning-foreground hover:bg-warning/90
+           shadow-lg shadow-warning/30;
+  }
+
+  .btn-pos-accent {
+    @apply btn-pos bg-accent text-accent-foreground hover:bg-accent/90
+           shadow-lg shadow-accent/30;
+  }
+
+  .btn-pos-secondary {
+    @apply btn-pos bg-secondary text-secondary-foreground hover:bg-secondary/80
+           border border-border;
+  }
+
+  .btn-pos-ghost {
+    @apply btn-pos bg-transparent hover:bg-secondary text-foreground;
+  }
+
+  /* === Cards Operacionales === */
+  .card-pos {
+    @apply bg-card text-card-foreground rounded-xl border border-border
+           shadow-soft transition-all duration-200;
+  }
+
+  .card-pos-elevated {
+    @apply card-pos hover:shadow-lg hover:border-primary/30;
+  }
+
+  .card-pos-interactive {
+    @apply card-pos cursor-pointer hover:bg-secondary/50 hover:border-primary/50
+           active:scale-[0.99];
+  }
+
+  /* === Layouts POS === */
+  .pos-header {
+    @apply h-16 bg-surface border-b border-border flex items-center justify-between px-6
+           sticky top-0 z-30 shadow-sm;
+  }
+
+  .pos-sidebar {
+    @apply w-64 bg-surface border-r border-border flex flex-col h-full;
+  }
+
+  .pos-main {
+    @apply flex-1 overflow-auto p-6;
+  }
+
+  /* === Indicadores de Estado === */
+  .status-dot {
+    @apply w-3 h-3 rounded-full;
+  }
+
+  .status-active {
+    @apply bg-success animate-pulse;
+  }
+
+  .status-warning {
+    @apply bg-warning;
+  }
+
+  .status-error {
+    @apply bg-destructive animate-pulse;
+  }
+
+  .status-inactive {
+    @apply bg-muted-foreground;
+  }
+
+  /* === Badges POS === */
+  .badge-pos {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  .badge-success {
+    @apply badge-pos bg-success/20 text-success;
+  }
+
+  .badge-warning {
+    @apply badge-pos bg-warning/20 text-warning;
+  }
+
+  .badge-danger {
+    @apply badge-pos bg-destructive/20 text-destructive;
+  }
+
+  .badge-info {
+    @apply badge-pos bg-primary/20 text-primary;
+  }
+
+  .badge-accent {
+    @apply badge-pos bg-accent/20 text-accent;
+  }
+
+  /* === Inputs POS === */
+  .input-pos {
+    @apply w-full bg-input border border-border rounded-xl px-4 py-3 text-lg
+           placeholder:text-muted-foreground focus:outline-none focus:ring-2 
+           focus:ring-primary focus:border-transparent transition-all;
+  }
+
+  /* === Teclado Numérico === */
+  .numpad-btn {
+    @apply flex items-center justify-center text-2xl font-semibold
+           bg-secondary hover:bg-secondary/80 rounded-xl h-16
+           transition-all active:scale-95 select-none;
+  }
+
+  /* === Grids de Productos === */
+  .products-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  /* === Animaciones === */
+  .fade-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .pulse-success {
+    animation: pulseSuccess 2s infinite;
+  }
+
+  @keyframes pulseSuccess {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+    }
+  }
+
+  /* === Overlays y Modales === */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  }
+
+  .modal-content {
+    @apply bg-card rounded-2xl border border-border shadow-2xl max-h-[90vh] overflow-auto
+           fade-in;
+  }
+
+  /* === Recibo/Factura estilo ticket === */
+  .receipt-paper {
+    @apply bg-white text-gray-900 font-mono text-sm p-6 rounded-lg;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 20px,
+      rgba(0,0,0,0.02) 20px,
+      rgba(0,0,0,0.02) 21px
+    );
+  }
+
+  /* === Glass Effect === */
+  .glass {
+    @apply bg-card/70 backdrop-blur-md border border-border/50;
+  }
+}
+
+@layer utilities {
+  /* === Utilidades de texto para valores monetarios === */
+  .text-money {
+    @apply font-semibold tabular-nums tracking-tight;
+  }
+
+  .text-money-lg {
+    @apply text-3xl font-bold tabular-nums tracking-tight;
+  }
+
+  .text-money-xl {
+    @apply text-4xl font-extrabold tabular-nums tracking-tight;
+  }
+
+  /* === Utilidades de layout POS === */
+  .pos-full-height {
+    height: calc(100vh - 4rem); /* Resta header */
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* === Focus visible para accesibilidad === */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 
+           focus:ring-offset-background;
   }
 }
