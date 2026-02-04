@@ -55,7 +55,7 @@ export function POSModal({
       >
         {/* Header */}
         {(title || showClose) && (
-          <div className="flex items-center justify-between p-6 border-b border-border">
+          <div className="flex items-center justify-between p-6 md:p-8 border-b border-border">
             <div className="flex items-center gap-3">
               {type !== 'default' && <Icon className={cn('h-6 w-6', color)} />}
               {title && <h2 className="text-xl font-semibold">{title}</h2>}
@@ -72,13 +72,13 @@ export function POSModal({
         )}
 
         {/* Content */}
-        <div className="p-6">
+        <div className="p-6 md:p-8">
           {children}
         </div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-border">
+          <div className="flex items-center justify-end gap-3 p-6 md:p-8 border-t border-border">
             {footer}
           </div>
         )}

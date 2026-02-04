@@ -1,0 +1,288 @@
+openapi: 3.0.3
+info:
+  title: POLIVERSE POS API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3001/api/v1
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ApiMeta:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        requestId: { type: string }
+    ApiSuccess:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data: { type: object }
+        meta: { $ref: '#/components/schemas/ApiMeta' }
+    ApiError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+    LoginRequest:
+      type: object
+      required: [user_id, code]
+      properties:
+        user_id: { type: string }
+        code: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        token: { type: string }
+        refresh_token: { type: string }
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            role: { type: string, enum: [cashier, supervisor, admin] }
+        expires_at: { type: string, format: date-time }
+    CashSessionOpenRequest:
+      type: object
+      required: [site_id, terminal_id, cash_register_id, opened_by_user_id, opening_cash_amount, denominations]
+      properties:
+        site_id: { type: string }
+        terminal_id: { type: string }
+        cash_register_id: { type: string }
+        shift_id: { type: string }
+        opened_by_user_id: { type: string }
+        opening_cash_amount: { type: string }
+        denominations: { type: object, additionalProperties: { type: integer } }
+        approval_id: { type: string, nullable: true }
+    CashSessionCloseRequest:
+      type: object
+      required: [site_id, closed_by_user_id, closing_cash_amount, denominations]
+      properties:
+        site_id: { type: string }
+        closed_by_user_id: { type: string }
+        closing_cash_amount: { type: string }
+        denominations: { type: object, additionalProperties: { type: integer } }
+        close_reason: { type: string }
+        approval_id: { type: string, nullable: true }
+    SupervisorApprovalRequest:
+      type: object
+      required: [site_id, requested_by_user_id, action, entity_type, entity_id, reason, supervisor_code]
+      properties:
+        site_id: { type: string }
+        requested_by_user_id: { type: string }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string }
+        reason: { type: string }
+        supervisor_code: { type: string }
+    SaleCreateRequest:
+      type: object
+      required: [site_id, shift_id, terminal_id, cash_session_id, created_by_user_id, items, payments]
+      properties:
+        site_id: { type: string }
+        customer_id: { type: string }
+        shift_id: { type: string }
+        terminal_id: { type: string }
+        cash_session_id: { type: string }
+        created_by_user_id: { type: string }
+        requires_invoice: { type: boolean }
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              product_id: { type: string }
+              quantity: { type: integer }
+        payments:
+          type: array
+          items:
+            type: object
+            required: [method, amount]
+            properties:
+              method: { type: string, enum: [cash, transfer, qr, card, mixed, debit, credit] }
+              amount: { type: string }
+              reference: { type: string }
+    CardRechargeRequest:
+      type: object
+      required: [site_id, amount, payment_method, terminal_id, shift_id, cash_session_id, created_by_user_id]
+      properties:
+        site_id: { type: string }
+        customer_id: { type: string }
+        amount: { type: string }
+        payment_method: { type: string, enum: [CASH, TRANSFER, QR, CARD, MIXED] }
+        terminal_id: { type: string }
+        shift_id: { type: string }
+        cash_session_id: { type: string }
+        created_by_user_id: { type: string }
+paths:
+  /auth/login:
+    post:
+      summary: Login con código de 6 dígitos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiSuccess' }
+  /auth/refresh:
+    post:
+      summary: Refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200': { description: OK }
+  /auth/users:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Lista usuarios para login
+      responses:
+        '200': { description: OK }
+  /cash-sessions/open:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Apertura de caja
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CashSessionOpenRequest' }
+      responses:
+        '200': { description: OK }
+  /cash-sessions/{id}/movements:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Registrar retiro/ajuste
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id, type, amount, reason, created_by_user_id, authorized_by_user_id, approval_id]
+              properties:
+                site_id: { type: string }
+                type: { type: string, enum: [WITHDRAWAL, ADJUSTMENT] }
+                amount: { type: string }
+                reason: { type: string }
+                created_by_user_id: { type: string }
+                authorized_by_user_id: { type: string }
+                approval_id: { type: string }
+      responses:
+        '200': { description: OK }
+  /cash-sessions/{id}/close:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Cierre de caja
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CashSessionCloseRequest' }
+      responses:
+        '200': { description: OK }
+  /cash-sessions/{id}:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Resumen de caja
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /supervisor-approvals:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Crear autorización de supervisor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupervisorApprovalRequest' }
+      responses:
+        '200': { description: OK }
+  /sales:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Crear venta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaleCreateRequest' }
+      responses:
+        '200': { description: OK }
+  /cards:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Crear tarjeta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id, uid]
+              properties:
+                site_id: { type: string }
+                uid: { type: string }
+      responses:
+        '200': { description: OK }
+  /cards/{uid}:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Consultar tarjeta
+      parameters:
+        - in: path
+          name: uid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /cards/{uid}/recharge:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Recargar tarjeta
+      parameters:
+        - in: path
+          name: uid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardRechargeRequest' }
+      responses:
+        '200': { description: OK }

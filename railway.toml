@@ -1,0 +1,6 @@
+[build]
+installCommand = "npm ci --include=dev"
+buildCommand = "npm run prisma:generate"
+
+[deploy]
+startCommand = "scripts/railway-start.sh"

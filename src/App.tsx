@@ -8,8 +8,31 @@ import CashierDashboard from "./pages/CashierDashboard";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
+import { canAccessRoute, getAuthUser } from "./lib/auth";
+import type { UserRole } from "./types/pos.types";
 
 const queryClient = new QueryClient();
+
+const roleRoute: Record<UserRole, string> = {
+  cashier: "/cashier",
+  supervisor: "/supervisor",
+  admin: "/admin",
+};
+
+const ProtectedRoute = ({
+  requiredRole,
+  element,
+}: {
+  requiredRole: UserRole;
+  element: JSX.Element;
+}) => {
+  const user = getAuthUser();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!canAccessRoute(user.role, requiredRole)) {
+    return <Navigate to={roleRoute[user.role]} replace />;
+  }
+  return element;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -25,9 +48,18 @@ const App = () => (
           <Route path="/login" element={<LoginPage />} />
           
           {/* Dashboards por rol */}
-          <Route path="/cashier" element={<CashierDashboard />} />
-          <Route path="/supervisor" element={<SupervisorDashboard />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route
+            path="/cashier"
+            element={<ProtectedRoute requiredRole="cashier" element={<CashierDashboard />} />}
+          />
+          <Route
+            path="/supervisor"
+            element={<ProtectedRoute requiredRole="supervisor" element={<SupervisorDashboard />} />}
+          />
+          <Route
+            path="/admin"
+            element={<ProtectedRoute requiredRole="admin" element={<AdminDashboard />} />}
+          />
           
           {/* 404 */}
           <Route path="*" element={<NotFound />} />

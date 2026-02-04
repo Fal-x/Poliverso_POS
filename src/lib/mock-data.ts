@@ -13,10 +13,19 @@ import type {
 
 // Usuarios de prueba
 export const mockUsers: User[] = [
-  { id: '1', name: 'María García', email: 'maria@poliverso.com', role: 'cashier', createdAt: new Date() },
-  { id: '2', name: 'Carlos López', email: 'carlos@poliverso.com', role: 'supervisor', createdAt: new Date() },
-  { id: '3', name: 'Ana Martínez', email: 'ana@poliverso.com', role: 'admin', createdAt: new Date() },
+  { id: '1', name: 'Cajero 1', email: 'cajero1@poliverso.local', role: 'cashier', createdAt: new Date() },
+  { id: '2', name: 'Cajero 2', email: 'cajero2@poliverso.local', role: 'cashier', createdAt: new Date() },
+  { id: '3', name: 'Supervisor Turno', email: 'supervisor@poliverso.local', role: 'supervisor', createdAt: new Date() },
+  { id: '4', name: 'Admin POLIVERSE', email: 'admin@poliverso.local', role: 'admin', createdAt: new Date() },
 ];
+
+// Códigos de acceso (demo)
+export const mockAuthCodes: Record<string, string> = {
+  '1': '333333',
+  '2': '444444',
+  '3': '222222',
+  '4': '111111',
+};
 
 // Categorías de productos
 export const mockCategories: ProductCategory[] = [

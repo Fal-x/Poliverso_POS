@@ -14,13 +14,13 @@ Todas las peticiones requieren header `Authorization: Bearer <token>` excepto `/
 ## 🔐 Autenticación
 
 ### POST /auth/login
-Iniciar sesión con PIN.
+Iniciar sesión con código de 6 dígitos.
 
 **Request:**
 ```json
 {
   "user_id": "uuid",
-  "pin": "1234"
+  "code": "123456"
 }
 ```
 

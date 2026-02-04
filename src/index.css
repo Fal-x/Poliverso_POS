@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,13 +9,11 @@
    Prioridad: Velocidad > Estética, Claridad > Creatividad
 */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
 @layer base {
   :root {
     /* === Colores Base (Light mode - no usado, pero definido) === */
-    --background: 220 14% 96%;
-    --foreground: 222 47% 11%;
+    --background: 220 35% 98%;
+    --foreground: 222 42% 11%;
 
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
@@ -21,17 +21,17 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    --primary: 217 91% 60%;
+    --primary: 214 78% 55%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 215 20% 65%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 220 22% 94%;
+    --secondary-foreground: 222 38% 16%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 220 20% 96%;
+    --muted-foreground: 215 18% 44%;
 
-    --accent: 263 70% 58%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 45 94% 54%;
+    --accent-foreground: 20 14% 10%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -39,12 +39,12 @@
     --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 0%;
+    --warning: 42 96% 50%;
+    --warning-foreground: 20 14% 10%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
+    --border: 220 16% 90%;
+    --input: 220 20% 95%;
+    --ring: 214 78% 55%;
 
     --radius: 0.75rem;
 
@@ -71,7 +71,7 @@
     --popover: 217 33% 12%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 217 91% 60%;
+    --primary: 214 78% 58%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 217 33% 17%;
@@ -80,8 +80,8 @@
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
 
-    --accent: 263 70% 58%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 45 96% 56%;
+    --accent-foreground: 20 14% 10%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -89,12 +89,12 @@
     --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 0%;
+    --warning: 42 96% 52%;
+    --warning-foreground: 20 14% 10%;
 
     --border: 217 33% 20%;
     --input: 217 33% 20%;
-    --ring: 217 91% 60%;
+    --ring: 214 78% 58%;
 
     /* === Tokens Operacionales Dark === */
     --surface: 217 33% 12%;
@@ -114,7 +114,7 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
   }
 
   /* Scrollbar personalizado para POS */
@@ -147,6 +147,22 @@
            px-6 py-4 min-h-[56px] transition-all duration-200
            focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background
            active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-pos-sm {
+    @apply px-3 py-2 min-h-[36px] text-sm gap-1.5;
+  }
+
+  .btn-pos-md {
+    @apply px-4 py-3 min-h-[44px] text-base gap-2;
+  }
+
+  .btn-pos-lg {
+    @apply px-6 py-4 min-h-[56px] text-lg gap-2;
+  }
+
+  .btn-pos-xl {
+    @apply px-8 py-5 min-h-[68px] text-xl gap-3;
   }
 
   .btn-pos-primary {
@@ -196,6 +212,14 @@
   .card-pos-interactive {
     @apply card-pos cursor-pointer hover:bg-secondary/50 hover:border-primary/50
            active:scale-[0.99];
+  }
+
+  .pos-section-title {
+    @apply text-xs uppercase tracking-wider text-muted-foreground font-semibold;
+  }
+
+  .pos-section-divider {
+    @apply h-px bg-border my-4;
   }
 
   /* === Layouts POS === */
@@ -258,11 +282,40 @@
     @apply badge-pos bg-accent/20 text-accent;
   }
 
+  /* === Alerts POS === */
+  .alert-pos {
+    @apply rounded-xl border px-4 py-3 text-sm;
+  }
+
+  .alert-info {
+    @apply alert-pos bg-secondary/50 border-border text-muted-foreground;
+  }
+
+  .alert-warning {
+    @apply alert-pos bg-warning/10 border-warning/30 text-warning;
+  }
+
+  .alert-danger {
+    @apply alert-pos bg-destructive/10 border-destructive/30 text-destructive;
+  }
+
   /* === Inputs POS === */
   .input-pos {
     @apply w-full bg-input border border-border rounded-xl px-4 py-3 text-lg
            placeholder:text-muted-foreground focus:outline-none focus:ring-2 
            focus:ring-primary focus:border-transparent transition-all;
+  }
+
+  .input-pos-compact {
+    @apply input-pos text-base py-2 min-h-[40px];
+  }
+
+  .input-pos-error {
+    @apply input-pos border-destructive focus:ring-destructive;
+  }
+
+  .input-pos-disabled {
+    @apply input-pos opacity-60 cursor-not-allowed;
   }
 
   /* === Teclado Numérico === */
@@ -274,8 +327,52 @@
 
   /* === Grids de Productos === */
   .products-grid {
-    @apply grid gap-3;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    @apply grid gap-2;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+
+  .product-card {
+    @apply card-pos-interactive p-2.5 text-left flex flex-col gap-1;
+  }
+
+  .product-name {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .product-price {
+    @apply text-[1.35rem] font-bold tabular-nums text-foreground leading-none;
+  }
+
+  .pos-cart-item {
+    @apply flex items-center justify-between p-2.5 bg-card rounded-lg border border-border/70;
+  }
+
+  .pos-total {
+    @apply flex items-center justify-between gap-4 bg-card border border-border rounded-xl p-4;
+  }
+
+  .pos-total-amount {
+    @apply text-4xl font-extrabold tabular-nums tracking-tight;
+  }
+
+  /* === Chips / Tabs === */
+  .chip-pos {
+    @apply px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all
+           bg-secondary text-muted-foreground hover:bg-secondary/80;
+  }
+
+  .chip-pos-active {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  /* === Option Tiles === */
+  .tile-option {
+    @apply p-3 rounded-xl flex items-center gap-2 transition-all border border-border
+           bg-secondary/70 hover:bg-secondary;
+  }
+
+  .tile-option-active {
+    @apply bg-primary text-primary-foreground border-primary/40 shadow-soft;
   }
 
   /* === Animaciones === */
@@ -324,11 +421,11 @@
 
   /* === Overlays y Modales === */
   .modal-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 md:p-8 lg:p-10;
   }
 
   .modal-content {
-    @apply bg-card rounded-2xl border border-border shadow-2xl max-h-[90vh] overflow-auto
+    @apply bg-card rounded-2xl border border-border shadow-2xl max-h-[85vh] md:max-h-[80vh] overflow-auto
            fade-in;
   }
 

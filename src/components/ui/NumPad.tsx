@@ -92,7 +92,7 @@ export function NumPad({
 interface PinPadProps {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (value?: string) => void;
   maxLength?: number;
   error?: string;
 }
@@ -109,7 +109,7 @@ export function PinPad({
       const newValue = value + digit;
       onChange(newValue);
       if (newValue.length === maxLength) {
-        setTimeout(onSubmit, 200);
+        setTimeout(() => onSubmit(newValue), 150);
       }
     }
   };
@@ -126,10 +126,12 @@ export function PinPad({
           <div
             key={idx}
             className={cn(
-              'w-14 h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-bold transition-all',
+              'w-12 h-12 rounded-lg border-2 flex items-center justify-center text-2xl font-bold transition-all',
               idx < value.length
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border bg-secondary',
+              idx === value.length && !error && 'ring-2 ring-primary/30',
+              value.length === maxLength && !error && 'border-success/60 bg-success/10 text-success',
               error && 'border-destructive animate-shake'
             )}
           >

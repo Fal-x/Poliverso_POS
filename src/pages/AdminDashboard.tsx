@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { POSLayout } from '@/components/layout/POSLayout';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { POSLayout } from '@/layouts/POSLayout';
 import { POSButton } from '@/components/ui/POSButton';
+import { ConfirmModal } from '@/components/ui/POSModal';
 import { 
   Settings, 
   Package, 
@@ -23,14 +25,24 @@ import {
   Store,
   Shield
 } from 'lucide-react';
-import { mockProducts, mockCategories, mockPrizes, mockBonuses, mockUsers, formatCurrency } from '@/lib/mock-data';
+import { formatCurrency } from '@/lib/formatters';
+import { api } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { clearAuthUser, getAuthUser, isCashOpen, getSiteIdStored } from '@/lib/auth';
 
 type AdminModule = 'config' | 'inventory' | 'reports' | 'sales' | 'users';
 
 export default function AdminDashboard() {
+  const navigate = useNavigate();
+  const authUser = getAuthUser();
   const [activeModule, setActiveModule] = useState<AdminModule>('config');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
+  const [bonuses, setBonuses] = useState<any[]>([]);
+  const [prizes, setPrizes] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
 
   const modules = [
     { id: 'config' as AdminModule, icon: Settings, label: 'Configuración', description: 'Sistema y parámetros' },
@@ -40,14 +52,47 @@ export default function AdminDashboard() {
     { id: 'users' as AdminModule, icon: Users, label: 'Usuarios', description: 'Gestión de usuarios' },
   ];
 
+  useEffect(() => {
+    const siteId = getSiteIdStored();
+    if (!siteId) return;
+    api<any[]>(`/products?site_id=${siteId}`).then(setProducts).catch(() => setProducts([]));
+    api<any[]>(`/bonus-scales?site_id=${siteId}`).then(setBonuses).catch(() => setBonuses([]));
+    api<any[]>(`/inventory/prizes?site_id=${siteId}`).then(setPrizes).catch(() => setPrizes([]));
+    api<any[]>(`/users?site_id=${siteId}`).then(setUsers).catch(() => setUsers([]));
+  }, []);
+
+  useEffect(() => {
+    const cats = Array.from(new Set(products.map(p => p.category))).map(c => ({ id: c, name: c }));
+    setCategories(cats);
+  }, [products]);
+
+  const handleLogout = () => {
+    if (isCashOpen()) return;
+    setShowExitConfirm(true);
+  };
+
   return (
-    <POSLayout userName="Ana Martínez" userRole="Administrador">
-      <div className="flex w-full pos-full-height">
+    <POSLayout
+      userName={authUser?.name ?? 'Administrador'}
+      userRole="Administrador"
+      onLogout={handleLogout}
+      logoutDisabled={isCashOpen()}
+    >
+        <div className="flex w-full pos-full-height">
         {/* Sidebar de Módulos */}
-        <div className="w-72 border-r border-border bg-surface flex flex-col">
+        <div className="pos-sidebar w-64">
           <div className="p-4 border-b border-border">
             <h2 className="font-semibold text-lg">Panel Administrativo</h2>
             <p className="text-sm text-muted-foreground">Gestión del sistema</p>
+          </div>
+
+          <div className="p-4 space-y-2 border-b border-border">
+            <POSButton variant="secondary" size="sm" fullWidth onClick={() => navigate('/cashier')}>
+              Ir a Cajero
+            </POSButton>
+            <POSButton variant="secondary" size="sm" fullWidth onClick={() => navigate('/supervisor')}>
+              Ir a Supervisor
+            </POSButton>
           </div>
 
           <nav className="flex-1 p-2 space-y-1">
@@ -56,9 +101,9 @@ export default function AdminDashboard() {
                 key={module.id}
                 onClick={() => setActiveModule(module.id)}
                 className={cn(
-                  'w-full flex items-center gap-3 p-4 rounded-xl transition-all text-left',
+                  'w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left',
                   activeModule === module.id
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground shadow-soft'
                     : 'hover:bg-secondary'
                 )}
               >
@@ -99,11 +144,11 @@ export default function AdminDashboard() {
                   <div className="space-y-3">
                     <div>
                       <label className="text-sm text-muted-foreground">Nombre</label>
-                      <input className="input-pos" defaultValue="POLIVERSO - MallBP" />
+                      <input className="input-pos input-pos-compact" defaultValue="POLIVERSO - MallBP" />
                     </div>
                     <div>
                       <label className="text-sm text-muted-foreground">Ubicación</label>
-                      <input className="input-pos" defaultValue="Montelíbano, Córdoba" />
+                      <input className="input-pos input-pos-compact" defaultValue="Montelíbano, Córdoba" />
                     </div>
                   </div>
                 </div>
@@ -114,11 +159,11 @@ export default function AdminDashboard() {
                     <h3 className="font-semibold text-lg">Seguridad</h3>
                   </div>
                   <div className="space-y-3">
-                    <label className="flex items-center gap-3 p-3 bg-secondary rounded-xl cursor-pointer">
+                    <label className="flex items-center gap-3 p-3 bg-secondary/70 rounded-xl cursor-pointer">
                       <input type="checkbox" className="h-5 w-5" defaultChecked />
                       <span>Requerer PIN para anulaciones</span>
                     </label>
-                    <label className="flex items-center gap-3 p-3 bg-secondary rounded-xl cursor-pointer">
+                    <label className="flex items-center gap-3 p-3 bg-secondary/70 rounded-xl cursor-pointer">
                       <input type="checkbox" className="h-5 w-5" defaultChecked />
                       <span>Doble confirmación en cierres</span>
                     </label>
@@ -133,11 +178,11 @@ export default function AdminDashboard() {
                   <div className="space-y-3">
                     <div>
                       <label className="text-sm text-muted-foreground">Precio de tarjeta nueva</label>
-                      <input className="input-pos" defaultValue="10000" type="number" />
+                      <input className="input-pos input-pos-compact" defaultValue="10000" type="number" />
                     </div>
                     <div>
                       <label className="text-sm text-muted-foreground">Recarga mínima</label>
-                      <input className="input-pos" defaultValue="5000" type="number" />
+                      <input className="input-pos input-pos-compact" defaultValue="5000" type="number" />
                     </div>
                   </div>
                 </div>
@@ -150,13 +195,13 @@ export default function AdminDashboard() {
                   <div className="space-y-3">
                     <div>
                       <label className="text-sm text-muted-foreground">Puntos por cada $1,000</label>
-                      <input className="input-pos" defaultValue="1" type="number" />
+                      <input className="input-pos input-pos-compact" defaultValue="1" type="number" />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <POSButton variant="success">
+              <POSButton variant="success" size="md">
                 Guardar Cambios
               </POSButton>
             </div>
@@ -180,13 +225,13 @@ export default function AdminDashboard() {
                 <div className="flex-1 relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                   <input
-                    className="input-pos pl-12"
+                    className="input-pos input-pos-compact pl-10"
                     placeholder="Buscar productos..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
-                <POSButton variant="secondary" icon={Filter}>
+                <POSButton variant="secondary" size="sm" icon={Filter}>
                   Filtrar
                 </POSButton>
               </div>
@@ -196,7 +241,7 @@ export default function AdminDashboard() {
                 {['Productos', 'Bonos', 'Premios', 'Categorías'].map((tab) => (
                   <button
                     key={tab}
-                    className="px-4 py-2 rounded-xl bg-secondary hover:bg-secondary/80 font-medium"
+                    className="chip-pos"
                   >
                     {tab}
                   </button>
@@ -207,7 +252,7 @@ export default function AdminDashboard() {
               <div className="card-pos overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-secondary">
+                    <thead className="bg-secondary/70">
                       <tr>
                         <th className="text-left p-4 font-medium">Producto</th>
                         <th className="text-left p-4 font-medium">Categoría</th>
@@ -218,30 +263,30 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {mockProducts.filter(p => 
+                      {products.filter(p =>
                         p.name.toLowerCase().includes(searchTerm.toLowerCase())
                       ).map((product) => (
                         <tr key={product.id} className="border-t border-border hover:bg-secondary/30">
                           <td className="p-4 font-medium">{product.name}</td>
                           <td className="p-4 text-muted-foreground">
-                            {mockCategories.find(c => c.id === product.categoryId)?.name}
+                            {categories.find(c => c.id === product.category)?.name ?? product.category}
                           </td>
-                          <td className="p-4 text-right font-mono">{formatCurrency(product.price)}</td>
+                          <td className="p-4 text-right font-mono">{formatCurrency(Number(product.price))}</td>
                           <td className="p-4 text-right">{product.stock ?? '∞'}</td>
                           <td className="p-4 text-center">
                             <span className={cn(
-                              'px-2 py-1 rounded-full text-xs font-medium',
-                              product.isActive ? 'bg-success/20 text-success' : 'bg-muted text-muted-foreground'
+                              'badge-pos',
+                              product.isActive ?? true ? 'badge-success' : 'badge-info'
                             )}>
-                              {product.isActive ? 'Activo' : 'Inactivo'}
+                              {product.isActive ?? true ? 'Activo' : 'Inactivo'}
                             </span>
                           </td>
                           <td className="p-4">
                             <div className="flex justify-center gap-2">
-                              <button className="p-2 rounded-lg hover:bg-secondary">
+                              <button className="btn-pos-secondary btn-pos-sm">
                                 <Edit3 className="h-4 w-4" />
                               </button>
-                              <button className="p-2 rounded-lg hover:bg-destructive/20 text-destructive">
+                              <button className="btn-pos-danger btn-pos-sm">
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             </div>
@@ -265,13 +310,13 @@ export default function AdminDashboard() {
                   </POSButton>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {mockBonuses.map((bonus) => (
-                    <div key={bonus.id} className="p-4 bg-secondary rounded-xl">
+                  {bonuses.map((bonus) => (
+                    <div key={bonus.id} className="card-pos p-4">
                       <p className="text-sm text-muted-foreground">
-                        {formatCurrency(bonus.minAmount)} - {formatCurrency(bonus.maxAmount)}
+                        {formatCurrency(Number(bonus.min_amount))} - {formatCurrency(Number(bonus.max_amount ?? bonus.min_amount))}
                       </p>
                       <p className="text-xl font-bold text-accent mt-1">
-                        +{formatCurrency(bonus.bonusAmount)}
+                        +{formatCurrency(Number(bonus.bonus_amount))}
                       </p>
                     </div>
                   ))}
@@ -301,7 +346,7 @@ export default function AdminDashboard() {
                 ].map((report, idx) => (
                   <div key={idx} className="card-pos-interactive p-6">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className={cn('p-3 rounded-xl bg-secondary', report.color)}>
+                      <div className={cn('p-3 rounded-xl bg-secondary/70', report.color)}>
                         <report.icon className="h-6 w-6" />
                       </div>
                       <h3 className="font-semibold">{report.label}</h3>
@@ -329,10 +374,10 @@ export default function AdminDashboard() {
                   <p className="text-muted-foreground">Resumen de todas las transacciones</p>
                 </div>
                 <div className="flex gap-3">
-                  <POSButton variant="secondary" icon={Calendar}>
+                  <POSButton variant="secondary" size="sm" icon={Calendar}>
                     Hoy
                   </POSButton>
-                  <POSButton variant="secondary" icon={Filter}>
+                  <POSButton variant="secondary" size="sm" icon={Filter}>
                     Filtros
                   </POSButton>
                 </div>
@@ -385,7 +430,7 @@ export default function AdminDashboard() {
 
               <div className="card-pos overflow-hidden">
                 <table className="w-full">
-                  <thead className="bg-secondary">
+                  <thead className="bg-secondary/70">
                     <tr>
                       <th className="text-left p-4 font-medium">Usuario</th>
                       <th className="text-left p-4 font-medium">Email</th>
@@ -394,7 +439,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {mockUsers.map((user) => (
+                    {users.map((user) => (
                       <tr key={user.id} className="border-t border-border hover:bg-secondary/30">
                         <td className="p-4">
                           <div className="flex items-center gap-3">
@@ -407,10 +452,10 @@ export default function AdminDashboard() {
                         <td className="p-4 text-muted-foreground">{user.email}</td>
                         <td className="p-4">
                           <span className={cn(
-                            'px-3 py-1 rounded-full text-xs font-medium',
-                            user.role === 'admin' && 'bg-accent/20 text-accent',
-                            user.role === 'supervisor' && 'bg-warning/20 text-warning',
-                            user.role === 'cashier' && 'bg-primary/20 text-primary'
+                            'badge-pos',
+                            user.role === 'admin' && 'badge-accent',
+                            user.role === 'supervisor' && 'badge-warning',
+                            user.role === 'cashier' && 'badge-info'
                           )}>
                             {user.role === 'admin' && 'Administrador'}
                             {user.role === 'supervisor' && 'Supervisor'}
@@ -419,10 +464,10 @@ export default function AdminDashboard() {
                         </td>
                         <td className="p-4">
                           <div className="flex justify-center gap-2">
-                            <button className="p-2 rounded-lg hover:bg-secondary">
+                            <button className="btn-pos-secondary btn-pos-sm">
                               <Edit3 className="h-4 w-4" />
                             </button>
-                            <button className="p-2 rounded-lg hover:bg-destructive/20 text-destructive">
+                            <button className="btn-pos-danger btn-pos-sm">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -436,6 +481,20 @@ export default function AdminDashboard() {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showExitConfirm}
+        onClose={() => setShowExitConfirm(false)}
+        onConfirm={() => {
+          clearAuthUser();
+          setShowExitConfirm(false);
+          navigate('/login');
+        }}
+        title="Salir de sesión"
+        message="¿Deseas cerrar la sesión actual?"
+        confirmText="Salir"
+        variant="danger"
+      />
     </POSLayout>
   );
 }

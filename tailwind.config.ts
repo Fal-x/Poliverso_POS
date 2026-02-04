@@ -80,16 +80,16 @@ export default {
         "2xl": "1.5rem",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        display: ["Inter", "system-ui", "sans-serif"],
+        sans: ["IBM Plex Sans", "system-ui", "sans-serif"],
+        display: ["IBM Plex Sans", "system-ui", "sans-serif"],
         mono: ["Space Mono", "monospace"],
       },
       boxShadow: {
-        soft: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+        soft: "0 4px 8px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04)",
         glow: "0 0 15px rgba(59, 130, 246, 0.5)",
         "glow-success": "0 0 15px rgba(16, 185, 129, 0.4)",
         "glow-danger": "0 0 15px rgba(239, 68, 68, 0.4)",
-        "glow-accent": "0 0 15px rgba(139, 92, 246, 0.4)",
+        "glow-accent": "0 0 15px rgba(245, 196, 66, 0.4)",
       },
       keyframes: {
         "accordion-down": {

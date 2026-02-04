@@ -1,0 +1,1057 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Money amounts are stored as Decimal(18,2) in COP unless stated otherwise.
+/// Financial mutations are append-only via LedgerEvent + LedgerEntry and reversals.
+
+// ============================
+// Enumerations
+// ============================
+
+enum RoleName {
+  CASHIER
+  SUPERVISOR
+  ADMIN
+}
+
+enum PermissionCode {
+  POS_SALE_CREATE
+  POS_SALE_VOID
+  POS_SALE_REFUND
+  CASH_SHIFT_OPEN
+  CASH_SHIFT_CLOSE
+  CASH_WITHDRAWAL_CREATE
+  CARD_ISSUE
+  CARD_BLOCK
+  CARD_RECHARGE
+  CARD_ADJUST
+  POINTS_ADJUST
+  ATTRACTION_USAGE_REVERSE
+  PRIZE_REDEEM
+  INVENTORY_ADJUST
+  SERVICE_SALE_CREATE
+  SERVICE_SALE_ADJUST
+  REPORTS_VIEW
+  AUDIT_VIEW
+  ADMIN_SETTINGS
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum SiteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CardStatus {
+  ACTIVE
+  LOST
+  BLOCKED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+  RECONCILED
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+  SUSPENDED
+}
+
+enum CashCountType {
+  OPENING
+  CLOSING
+}
+
+enum CashMovementType {
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  QR
+  CARD
+  MIXED
+}
+
+enum SalePaymentType {
+  PAYMENT
+  DEPOSIT
+  ADJUSTMENT
+}
+
+enum SaleStatus {
+  OPEN
+  PARTIAL
+  PAID
+  VOIDED
+  REFUNDED
+}
+
+enum SaleCategory {
+  CARD_PLASTIC
+  GIFT_CARD
+  RECHARGE
+  PRIZE
+  SNACKS
+  SERVICE
+  OTHER
+}
+
+enum LedgerEventType {
+  SALE
+  RECHARGE
+  CASH_WITHDRAWAL
+  CASH_ADJUSTMENT
+  SERVICE_PAYMENT
+  PRIZE_REDEMPTION
+  ATTRACTION_USAGE
+  REVERSAL
+  MANUAL_ADJUSTMENT
+}
+
+enum LedgerEntrySide {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerAccount {
+  CASH_ON_HAND
+  BANK_TRANSFER
+  CARD_PROCESSOR
+  QR_PROVIDER
+  POS_REVENUE
+  CARD_PLASTIC_REVENUE
+  PRIZE_REVENUE
+  SNACKS_REVENUE
+  SERVICE_REVENUE
+  DEFERRED_SERVICE_REVENUE
+  CARD_FLOAT_LIABILITY
+  POINTS_LIABILITY
+  CASH_OVER_SHORT
+}
+
+enum InventoryCategory {
+  CARD_PLASTIC
+  PRIZE
+  SNACK
+  OTHER
+}
+
+enum InventoryMovementType {
+  OPENING_COUNT
+  PURCHASE
+  ADJUSTMENT
+  SALE
+  TRANSFER
+  REDEMPTION
+  CLOSING_COUNT
+}
+
+enum AttractionUsageType {
+  USE
+  REVERSAL
+}
+
+enum ServiceStatus {
+  OPEN
+  PARTIAL
+  CLOSED
+  CANCELLED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VOID
+  REVERSE
+  ADJUST
+  OPEN
+  CLOSE
+  AUTHORIZE
+}
+
+enum ApprovalAction {
+  VOID_SALE
+  REVERSE_LEDGER
+  ADJUST_BALANCE
+  REVERSE_ATTRACTION
+  CASH_WITHDRAWAL
+  INVENTORY_ADJUST
+  OTHER
+}
+
+enum EntityType {
+  SALE
+  LEDGER_EVENT
+  CARD
+  ATTRACTION_USAGE
+  INVENTORY_MOVEMENT
+  SERVICE_SALE
+  SHIFT
+  CASH_SESSION
+  ADMIN_ACTION
+  OTHER
+}
+
+enum CustomerDocumentType {
+  CC
+  CE
+  NIT
+  TI
+  PAS
+}
+
+enum AdminActionType {
+  SALE_VOID
+  SALE_CORRECTION
+  SALE_ADJUSTMENT
+  CASH_WITHDRAWAL
+  CASH_ADJUSTMENT
+  BALANCE_ADJUSTMENT
+  INVENTORY_ADJUSTMENT
+  OTHER
+}
+
+// ============================
+// Core tenancy + access
+// ============================
+
+/// Top-level ownership for multi-site operations.
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  legalName String
+  nit       String
+  phone     String?
+  address   String?
+  city      String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  sites Site[]
+
+  @@unique([name])
+}
+
+/// A physical location (sede) with its own configuration and operations.
+model Site {
+  id             String     @id @default(uuid())
+  organizationId String
+  name           String
+  code           String     @unique
+  address        String?
+  city           String?
+  phone          String?
+  defaultCustomerId String?
+  status         SiteStatus @default(ACTIVE)
+  timezone       String     @default("America/Bogota")
+  createdAt      DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime   @updatedAt @db.Timestamptz(6)
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  defaultCustomer Customer?  @relation("DefaultCustomer", fields: [defaultCustomerId], references: [id])
+  terminals      Terminal[]
+  cashRegisters  CashRegister[]
+  users          UserAssignment[]
+  customers      Customer[]
+  cards          Card[]
+  bonusScales    BonusScale[]
+  products       Product[]
+  services       Service[]
+  attractions    Attraction[]
+  readers        Reader[]
+  shifts         Shift[]
+  sales          Sale[]
+  ledgerEvents   LedgerEvent[]
+  auditLogs      AuditLog[]
+  inventoryItems InventoryItem[]
+  usages         AttractionUsage[]
+  inventoryMovements InventoryMovement[]
+  cardBalanceEvents  CardBalanceEvent[]
+  serviceSales       ServiceSale[]
+  approvals          SupervisorApproval[]
+  adminActions       AdminAction[]
+  cashSessions       CashSession[]
+  cashCounts         CashCount[]
+  cashMovements      CashMovement[]
+  configs        SiteConfig?
+
+  @@index([organizationId])
+  @@index([defaultCustomerId])
+}
+
+/// Per-site commercial and rules configuration.
+model SiteConfig {
+  id                 String   @id @default(uuid())
+  siteId             String   @unique
+  minRechargeAmount  Decimal  @db.Decimal(18, 2)
+  pointsPerCurrency  Int      @default(1)
+  currencyUnit       Int      @default(1000)
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+}
+
+/// Role registry with explicit permission mapping.
+model Role {
+  id        String   @id @default(uuid())
+  name      RoleName @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  permissions RolePermission[]
+  users       UserAssignment[]
+}
+
+/// Grants permissions per role; keep in sync with operational policy.
+model RolePermission {
+  id         String         @id @default(uuid())
+  roleId     String
+  permission PermissionCode
+
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([roleId, permission])
+  @@index([permission])
+}
+
+/// Operator account, scoped to sites via assignments.
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  fullName     String
+  passwordHash String
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @db.Timestamptz(6)
+
+  assignments      UserAssignment[]
+  authoredSales    Sale[]             @relation("SaleCreatedBy")
+  approvedSales    Sale[]             @relation("SaleApprovedBy")
+  ledgerEvents     LedgerEvent[]
+  auditLogs        AuditLog[]
+  approvals        SupervisorApproval[] @relation("ApprovalRequestedBy")
+  approvalsGiven   SupervisorApproval[] @relation("ApprovalApprovedBy")
+  adminActions     AdminAction[]
+  attractionEvents AttractionUsage[]
+  shiftsOpened     Shift[]            @relation("ShiftOpenedBy")
+  shiftsClosed     Shift[]            @relation("ShiftClosedBy")
+  inventoryMovements InventoryMovement[] @relation("InventoryPerformedBy")
+  authCode        UserAuthCode?
+  cashSessionsOpened CashSession[] @relation("CashSessionOpenedBy")
+  cashSessionsClosed CashSession[] @relation("CashSessionClosedBy")
+  cashCounts         CashCount[]   @relation("CashCountedBy")
+  cashMovementsCreated CashMovement[] @relation("CashMovementCreatedBy")
+  cashMovementsAuthorized CashMovement[] @relation("CashMovementAuthorizedBy")
+  refreshTokens   RefreshToken[]
+}
+
+/// Assignment of users to sites and roles; supports multi-site operators.
+model UserAssignment {
+  id        String   @id @default(uuid())
+  userId    String
+  siteId    String
+  roleId    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+  site Site @relation(fields: [siteId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, siteId, roleId])
+  @@index([siteId])
+  @@index([roleId])
+}
+
+/// Current 6-digit login code per user (rotated by backend).
+model UserAuthCode {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  codeHash      String
+  issuedAt      DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt     DateTime @db.Timestamptz(6)
+  failedAttempts Int     @default(0)
+  lockedUntil   DateTime? @db.Timestamptz(6)
+  lastUsedAt    DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([expiresAt])
+}
+
+/// Refresh token store for session rotation.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt DateTime @db.Timestamptz(6)
+  revokedAt DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, expiresAt])
+}
+
+// ============================
+// Terminals + shifts + cash
+// ============================
+
+/// Logical POS terminal within a site.
+model Terminal {
+  id        String   @id @default(uuid())
+  siteId    String
+  code      String
+  name      String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  site   Site    @relation(fields: [siteId], references: [id])
+  shifts Shift[]
+  sales  Sale[]
+  cashSessions CashSession[]
+
+  @@unique([siteId, code])
+  @@index([siteId])
+}
+
+/// Physical cash drawer / register.
+model CashRegister {
+  id        String   @id @default(uuid())
+  siteId    String
+  code      String
+  name      String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  site   Site    @relation(fields: [siteId], references: [id])
+  shifts Shift[]
+  cashSessions CashSession[]
+
+  @@unique([siteId, code])
+  @@index([siteId])
+}
+
+/// Shift captures open/close cash control with expected vs counted totals.
+model Shift {
+  id               String      @id @default(uuid())
+  siteId           String
+  cashRegisterId   String
+  terminalId       String
+  openedById       String
+  openedAt         DateTime    @default(now()) @db.Timestamptz(6)
+  openingCash      Decimal     @db.Decimal(18, 2)
+  status           ShiftStatus @default(OPEN)
+  closedById       String?
+  closedAt         DateTime?   @db.Timestamptz(6)
+  expectedCash     Decimal?    @db.Decimal(18, 2)
+  countedCash      Decimal?    @db.Decimal(18, 2)
+  cashDiscrepancy  Decimal?    @db.Decimal(18, 2)
+  notes            String?
+
+  site         Site         @relation(fields: [siteId], references: [id])
+  cashRegister CashRegister @relation(fields: [cashRegisterId], references: [id])
+  terminal     Terminal     @relation(fields: [terminalId], references: [id])
+  openedBy     User         @relation("ShiftOpenedBy", fields: [openedById], references: [id])
+  closedBy     User?        @relation("ShiftClosedBy", fields: [closedById], references: [id])
+  sales        Sale[]
+  ledgerEvents LedgerEvent[]
+  inventoryMovements InventoryMovement[]
+  cashSessions CashSession[]
+
+  @@index([siteId, openedAt])
+  @@index([cashRegisterId, openedAt])
+  @@index([terminalId, openedAt])
+}
+
+/// Cash session per terminal/cash register. Immutable history via append-only movements and counts.
+model CashSession {
+  id                 String            @id @default(uuid())
+  siteId             String
+  terminalId         String
+  cashRegisterId     String
+  shiftId            String?
+  openedByUserId     String
+  openedAt           DateTime          @default(now()) @db.Timestamptz(6)
+  openingCashAmount  Decimal           @db.Decimal(18, 2)
+  expectedCashAmount Decimal           @db.Decimal(18, 2)
+  closedAt           DateTime?         @db.Timestamptz(6)
+  closingCashAmount  Decimal?          @db.Decimal(18, 2)
+  cashDifference     Decimal?          @db.Decimal(18, 2)
+  closeReason        String?
+  status             CashSessionStatus @default(OPEN)
+  openedApprovalId   String?
+  closedApprovalId   String?
+
+  site         Site         @relation(fields: [siteId], references: [id])
+  terminal     Terminal     @relation(fields: [terminalId], references: [id])
+  cashRegister CashRegister @relation(fields: [cashRegisterId], references: [id])
+  shift        Shift?       @relation(fields: [shiftId], references: [id])
+  openedBy     User         @relation("CashSessionOpenedBy", fields: [openedByUserId], references: [id])
+  closedById   String?
+  closedBy     User?        @relation("CashSessionClosedBy", fields: [closedById], references: [id])
+  openedApproval SupervisorApproval? @relation("CashSessionOpenedApproval", fields: [openedApprovalId], references: [id])
+  closedApproval SupervisorApproval? @relation("CashSessionClosedApproval", fields: [closedApprovalId], references: [id])
+
+  counts      CashCount[]
+  movements   CashMovement[]
+  sales       Sale[]
+
+  @@index([siteId, openedAt])
+  @@index([terminalId, status])
+  @@index([cashRegisterId, status])
+}
+
+/// Physical cash count by denomination at open/close.
+model CashCount {
+  id             String        @id @default(uuid())
+  cashSessionId  String
+  siteId         String
+  type           CashCountType
+  denominations  Json
+  totalAmount    Decimal       @db.Decimal(18, 2)
+  countedByUserId String
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+  site        Site        @relation(fields: [siteId], references: [id])
+  countedBy   User        @relation("CashCountedBy", fields: [countedByUserId], references: [id])
+
+  @@index([cashSessionId, type])
+}
+
+/// Append-only cash movements for withdrawals and adjustments.
+model CashMovement {
+  id               String           @id @default(uuid())
+  cashSessionId    String
+  siteId           String
+  type             CashMovementType
+  amount           Decimal          @db.Decimal(18, 2)
+  reason           String
+  createdByUserId  String
+  authorizedByUserId String
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+  approvalId       String?
+
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+  site        Site        @relation(fields: [siteId], references: [id])
+  createdBy   User        @relation("CashMovementCreatedBy", fields: [createdByUserId], references: [id])
+  authorizedBy User       @relation("CashMovementAuthorizedBy", fields: [authorizedByUserId], references: [id])
+  approval    SupervisorApproval? @relation(fields: [approvalId], references: [id])
+
+  @@index([cashSessionId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ============================
+// Products, inventory, cards
+// ============================
+
+/// POS products sold at the counter (including recharge placeholders).
+model Product {
+  id        String        @id @default(uuid())
+  siteId    String
+  name      String
+  sku       String?
+  category  SaleCategory
+  price     Decimal       @db.Decimal(18, 2)
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(6)
+
+  site  Site   @relation(fields: [siteId], references: [id])
+  lines SaleLine[]
+
+  @@index([siteId, category])
+  @@unique([siteId, sku])
+}
+
+/// Canonical inventory items for cards, prizes, and store stock.
+model InventoryItem {
+  id        String            @id @default(uuid())
+  siteId    String
+  name      String
+  sku       String?
+  category  InventoryCategory
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime          @updatedAt @db.Timestamptz(6)
+
+  site      Site               @relation(fields: [siteId], references: [id])
+  movements InventoryMovement[]
+
+  @@index([siteId, category])
+  @@unique([siteId, sku])
+}
+
+/// Append-only inventory movements for auditability.
+model InventoryMovement {
+  id               String                @id @default(uuid())
+  siteId           String
+  itemId           String
+  shiftId          String?
+  performedById    String
+  type             InventoryMovementType
+  quantity         Int
+  unitCost         Decimal?              @db.Decimal(18, 2)
+  occurredAt       DateTime              @default(now()) @db.Timestamptz(6)
+  notes            String?
+  approvalId       String?
+
+  site        Site               @relation(fields: [siteId], references: [id])
+  item        InventoryItem      @relation(fields: [itemId], references: [id])
+  shift       Shift?             @relation(fields: [shiftId], references: [id])
+  performedBy User               @relation("InventoryPerformedBy", fields: [performedById], references: [id])
+  approval    SupervisorApproval? @relation(fields: [approvalId], references: [id])
+
+  @@index([siteId, occurredAt])
+  @@index([itemId, occurredAt])
+}
+
+/// Physical card issued to guests; UID is unique and immutable.
+model Card {
+  id        String     @id @default(uuid())
+  siteId    String
+  uid       String     @unique
+  status    CardStatus @default(ACTIVE)
+  issuedAt  DateTime   @default(now()) @db.Timestamptz(6)
+
+  site          Site              @relation(fields: [siteId], references: [id])
+  balances      CardBalanceEvent[]
+  rechargeLines SaleLine[]        @relation("RechargeLines")
+  usages        AttractionUsage[]
+  bonuses       BonusApplied[]
+
+  @@index([siteId, status])
+}
+
+/// Card balance events (money + points) are append-only and reversible.
+model CardBalanceEvent {
+  id             String      @id @default(uuid())
+  cardId         String
+  siteId         String
+  ledgerEventId  String?
+  occurredAt     DateTime    @default(now()) @db.Timestamptz(6)
+  moneyDelta     Decimal     @db.Decimal(18, 2)
+  pointsDelta    Int
+  reason         String
+  reversalOfId   String?
+
+  card        Card         @relation(fields: [cardId], references: [id])
+  site        Site         @relation(fields: [siteId], references: [id])
+  ledgerEvent LedgerEvent? @relation("CardBalanceLedger", fields: [ledgerEventId], references: [id])
+  reversalOf  CardBalanceEvent? @relation("CardBalanceReversal", fields: [reversalOfId], references: [id])
+  reversals   CardBalanceEvent[] @relation("CardBalanceReversal")
+
+  @@index([cardId, occurredAt])
+  @@index([siteId, occurredAt])
+}
+
+// ============================
+// Sales + payments + recharge
+// ============================
+
+/// Sale header; all money effects should be reflected in LedgerEvent.
+model Sale {
+  id                      String     @id @default(uuid())
+  siteId                  String
+  customerId              String
+  shiftId                 String
+  terminalId              String
+  cashSessionId           String
+  status                  SaleStatus @default(OPEN)
+  subtotal                Decimal    @db.Decimal(18, 2)
+  tax                     Decimal    @db.Decimal(18, 2)
+  total                   Decimal    @db.Decimal(18, 2)
+  totalPaid               Decimal    @db.Decimal(18, 2) @default(0)
+  balanceDue              Decimal    @db.Decimal(18, 2) @default(0)
+  bonusTotal              Decimal    @db.Decimal(18, 2) @default(0)
+  pointsEarned            Int        @default(0)
+  requiresElectronicInvoice Boolean   @default(false)
+  electronicInvoiceNumber String?
+  electronicInvoiceCode   String?
+  receiptNumber           String?
+  receiptText             String?
+  createdById             String
+  approvedById            String?
+  approvedAt              DateTime?  @db.Timestamptz(6)
+  createdAt               DateTime   @default(now()) @db.Timestamptz(6)
+  paidAt                  DateTime?  @db.Timestamptz(6)
+  voidedAt                DateTime?  @db.Timestamptz(6)
+
+  site       Site     @relation(fields: [siteId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+  shift      Shift    @relation(fields: [shiftId], references: [id])
+  terminal   Terminal @relation(fields: [terminalId], references: [id])
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+  createdBy  User     @relation("SaleCreatedBy", fields: [createdById], references: [id])
+  approvedBy User?    @relation("SaleApprovedBy", fields: [approvedById], references: [id])
+  lines      SaleLine[]
+  payments   SalePayment[]
+  ledgerEvents LedgerEvent[]
+  bonuses    BonusApplied[]
+
+  @@index([siteId, createdAt])
+  @@index([customerId])
+  @@index([shiftId, createdAt])
+  @@index([status, createdAt])
+  @@index([cashSessionId, createdAt])
+  @@index([receiptNumber])
+}
+
+/// Sale line items with optional card association for recharges or issuance.
+model SaleLine {
+  id          String       @id @default(uuid())
+  saleId      String
+  productId   String?
+  cardId      String?
+  category    SaleCategory
+  quantity    Int
+  unitPrice   Decimal      @db.Decimal(18, 2)
+  lineTotal   Decimal      @db.Decimal(18, 2)
+  metadata    Json?
+
+  sale     Sale    @relation(fields: [saleId], references: [id])
+  product  Product? @relation(fields: [productId], references: [id])
+  card     Card?   @relation("RechargeLines", fields: [cardId], references: [id])
+
+  @@index([saleId])
+  @@index([category])
+}
+
+/// Supports mixed tender payments per sale.
+model SalePayment {
+  id        String        @id @default(uuid())
+  saleId    String
+  method    PaymentMethod
+  type      SalePaymentType @default(PAYMENT)
+  amount    Decimal       @db.Decimal(18, 2)
+  reference String?
+  createdAt DateTime      @default(now()) @db.Timestamptz(6)
+
+  sale Sale @relation(fields: [saleId], references: [id])
+
+  @@index([method])
+  @@index([createdAt])
+}
+
+/// Bonus rules per site, used to compute extra balance on recharges.
+model BonusScale {
+  id         String   @id @default(uuid())
+  siteId     String
+  minAmount  Decimal  @db.Decimal(18, 2)
+  maxAmount  Decimal? @db.Decimal(18, 2)
+  bonusAmount Decimal @db.Decimal(18, 2)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  site    Site           @relation(fields: [siteId], references: [id])
+  bonuses BonusApplied[]
+
+  @@index([siteId])
+}
+
+/// Explicit record of applied bonus for traceability.
+model BonusApplied {
+  id           String   @id @default(uuid())
+  cardId       String
+  saleId       String
+  bonusScaleId String
+  bonusAmount  Decimal  @db.Decimal(18, 2)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  card       Card       @relation(fields: [cardId], references: [id])
+  sale       Sale       @relation(fields: [saleId], references: [id])
+  bonusScale BonusScale @relation(fields: [bonusScaleId], references: [id])
+
+  @@index([cardId, createdAt])
+}
+
+// ============================
+// Attractions + readers
+// ============================
+
+/// Playable attraction with a fixed cost per use.
+model Attraction {
+  id        String   @id @default(uuid())
+  siteId    String
+  name      String
+  code      String
+  cost      Decimal  @db.Decimal(18, 2)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  site   Site   @relation(fields: [siteId], references: [id])
+  readers Reader[]
+  usages  AttractionUsage[]
+
+  @@unique([siteId, code])
+  @@index([siteId])
+}
+
+/// Reader device attached to an attraction; supports dual-reader setups.
+model Reader {
+  id           String   @id @default(uuid())
+  siteId       String
+  attractionId String
+  code         String
+  position     Int      @default(1)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  site       Site       @relation(fields: [siteId], references: [id])
+  attraction Attraction @relation(fields: [attractionId], references: [id])
+  usages     AttractionUsage[]
+
+  @@unique([attractionId, code])
+  @@index([siteId])
+}
+
+/// High-volume usage events; reversals are separate events linked by reversalOfId.
+model AttractionUsage {
+  id             BigInt             @id @default(autoincrement())
+  siteId         String
+  cardId         String
+  attractionId   String
+  readerId       String
+  playerIndex    Int                @default(1)
+  type           AttractionUsageType @default(USE)
+  cost           Decimal            @db.Decimal(18, 2)
+  occurredAt     DateTime           @default(now()) @db.Timestamptz(6)
+  ledgerEventId  String?
+  reversalOfId   BigInt?
+  performedById  String?
+  approvalId     String?
+
+  site        Site               @relation(fields: [siteId], references: [id])
+  card        Card               @relation(fields: [cardId], references: [id])
+  attraction  Attraction         @relation(fields: [attractionId], references: [id])
+  reader      Reader             @relation(fields: [readerId], references: [id])
+  ledgerEvent LedgerEvent?       @relation("AttractionUsageLedger", fields: [ledgerEventId], references: [id])
+  reversalOf  AttractionUsage?   @relation("AttractionUsageReversal", fields: [reversalOfId], references: [id])
+  reversals   AttractionUsage[]  @relation("AttractionUsageReversal")
+  performedBy User?              @relation(fields: [performedById], references: [id])
+  approval    SupervisorApproval? @relation(fields: [approvalId], references: [id])
+
+  @@index([siteId, occurredAt])
+  @@index([cardId, occurredAt])
+  @@index([attractionId, occurredAt])
+  @@index([readerId, occurredAt])
+}
+
+// ============================
+// Services
+// ============================
+
+/// Guest information for service-based sales.
+model Customer {
+  id        String   @id @default(uuid())
+  siteId    String
+  documentType CustomerDocumentType
+  documentNumber String
+  fullName  String
+  phone     String
+  email     String?
+  city      String
+  notes     String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  site        Site        @relation(fields: [siteId], references: [id])
+  serviceSales ServiceSale[]
+  sales        Sale[]
+  defaultForSites Site[]  @relation("DefaultCustomer")
+
+  @@unique([siteId, documentType, documentNumber])
+  @@index([siteId])
+  @@index([email])
+  @@index([phone])
+}
+
+/// Sellable service without card association (e.g., birthday packages).
+model Service {
+  id        String   @id @default(uuid())
+  siteId    String
+  name      String
+  price     Decimal  @db.Decimal(18, 2)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  site  Site   @relation(fields: [siteId], references: [id])
+  sales ServiceSale[]
+
+  @@index([siteId])
+  @@unique([siteId, name])
+}
+
+/// Service sale with partial payments and balance tracking.
+model ServiceSale {
+  id          String        @id @default(uuid())
+  siteId      String
+  serviceId   String
+  customerId  String
+  status      ServiceStatus @default(OPEN)
+  totalAmount Decimal       @db.Decimal(18, 2)
+  paidAmount  Decimal       @db.Decimal(18, 2)
+  createdAt   DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(6)
+
+  site     Site     @relation(fields: [siteId], references: [id])
+  service  Service  @relation(fields: [serviceId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+  payments ServicePayment[]
+  ledgerEvents LedgerEvent[]
+
+  @@index([siteId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// Payment records for service sales.
+model ServicePayment {
+  id            String   @id @default(uuid())
+  serviceSaleId String
+  amount        Decimal  @db.Decimal(18, 2)
+  method        PaymentMethod
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  serviceSale ServiceSale @relation(fields: [serviceSaleId], references: [id])
+
+  @@index([method])
+}
+
+// ============================
+// Ledger (append-only)
+// ============================
+
+/// Immutable financial event; corrections are made via reversal events.
+model LedgerEvent {
+  id            String           @id @default(uuid())
+  siteId        String
+  shiftId       String?
+  saleId        String?
+  serviceSaleId String?
+  eventType     LedgerEventType
+  description   String
+  occurredAt    DateTime         @default(now()) @db.Timestamptz(6)
+  createdById   String
+  reversalOfId  String?
+  approvalId    String?
+
+  site        Site       @relation(fields: [siteId], references: [id])
+  shift       Shift?     @relation(fields: [shiftId], references: [id])
+  sale        Sale?      @relation(fields: [saleId], references: [id])
+  serviceSale ServiceSale? @relation(fields: [serviceSaleId], references: [id])
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  approval    SupervisorApproval? @relation(fields: [approvalId], references: [id])
+  reversalOf  LedgerEvent? @relation("LedgerEventReversal", fields: [reversalOfId], references: [id])
+  reversals   LedgerEvent[] @relation("LedgerEventReversal")
+  entries     LedgerEntry[]
+  cardBalanceEvents CardBalanceEvent[] @relation("CardBalanceLedger")
+  attractionUsages  AttractionUsage[]  @relation("AttractionUsageLedger")
+
+  @@index([siteId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([saleId])
+}
+
+/// Double-entry lines per event to preserve accounting integrity.
+model LedgerEntry {
+  id          String         @id @default(uuid())
+  eventId     String
+  account     LedgerAccount
+  side        LedgerEntrySide
+  amount      Decimal        @db.Decimal(18, 2)
+  createdAt   DateTime       @default(now()) @db.Timestamptz(6)
+
+  event LedgerEvent @relation(fields: [eventId], references: [id])
+
+  @@index([eventId])
+  @@index([account])
+}
+
+// ============================
+// Supervisor approvals + audit
+// ============================
+
+/// Supervisor authorization record for sensitive operations.
+model SupervisorApproval {
+  id             String         @id @default(uuid())
+  siteId         String
+  action         ApprovalAction
+  entityType     EntityType
+  entityId       String
+  requestedById  String
+  approvedById   String
+  reason         String
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+
+  site        Site @relation(fields: [siteId], references: [id])
+  requestedBy User @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  approvedBy  User @relation("ApprovalApprovedBy", fields: [approvedById], references: [id])
+  ledgerEvents LedgerEvent[]
+  inventoryMovements InventoryMovement[]
+  attractionUsages AttractionUsage[]
+  cashSessionsOpened CashSession[] @relation("CashSessionOpenedApproval")
+  cashSessionsClosed CashSession[] @relation("CashSessionClosedApproval")
+  cashMovements      CashMovement[]
+  adminActions       AdminAction[]
+}
+
+/// Administrative actions with full traceability.
+model AdminAction {
+  id         String         @id @default(uuid())
+  siteId     String
+  actorId    String
+  actorRole  RoleName
+  actionType AdminActionType
+  entityType EntityType
+  entityId   String
+  reason     String
+  approvalId String?
+  metadata   Json?
+  createdAt  DateTime       @default(now()) @db.Timestamptz(6)
+
+  site     Site               @relation(fields: [siteId], references: [id])
+  actor    User               @relation(fields: [actorId], references: [id])
+  approval SupervisorApproval? @relation(fields: [approvalId], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actionType])
+}
+
+/// Immutable audit trail for administrative and financial actions.
+model AuditLog {
+  id          String     @id @default(uuid())
+  siteId      String
+  actorId     String
+  action      AuditAction
+  entityType  EntityType
+  entityId    String
+  before      Json?
+  after       Json?
+  reason      String?
+  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
+
+  site  Site @relation(fields: [siteId], references: [id])
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([entityType, entityId])
+}

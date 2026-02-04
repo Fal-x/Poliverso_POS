@@ -15,20 +15,20 @@ interface POSButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/30',
-  success: 'bg-success text-success-foreground hover:bg-success/90 shadow-lg shadow-success/30',
-  danger: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-lg shadow-destructive/30',
-  warning: 'bg-warning text-warning-foreground hover:bg-warning/90 shadow-lg shadow-warning/30',
-  accent: 'bg-accent text-accent-foreground hover:bg-accent/90 shadow-lg shadow-accent/30',
-  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border',
-  ghost: 'bg-transparent hover:bg-secondary text-foreground',
+  primary: 'btn-pos-primary',
+  success: 'btn-pos-success',
+  danger: 'btn-pos-danger',
+  warning: 'btn-pos-warning',
+  accent: 'btn-pos-accent',
+  secondary: 'btn-pos-secondary',
+  ghost: 'btn-pos-ghost',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'px-3 py-2 min-h-[36px] text-sm gap-1.5',
-  md: 'px-4 py-3 min-h-[44px] text-base gap-2',
-  lg: 'px-6 py-4 min-h-[56px] text-lg gap-2',
-  xl: 'px-8 py-5 min-h-[68px] text-xl gap-3',
+  sm: 'btn-pos-sm',
+  md: 'btn-pos-md',
+  lg: 'btn-pos-lg',
+  xl: 'btn-pos-xl',
 };
 
 export const POSButton = forwardRef<HTMLButtonElement, POSButtonProps>(
@@ -48,10 +48,7 @@ export const POSButton = forwardRef<HTMLButtonElement, POSButtonProps>(
       <button
         ref={ref}
         className={cn(
-          'inline-flex items-center justify-center rounded-xl font-semibold',
-          'transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring',
-          'focus:ring-offset-2 focus:ring-offset-background active:scale-[0.98]',
-          'disabled:opacity-50 disabled:pointer-events-none',
+          'btn-pos',
           variantStyles[variant],
           sizeStyles[size],
           fullWidth && 'w-full',

@@ -6,18 +6,22 @@ interface POSLayoutProps {
   userName?: string;
   userRole?: string;
   showHeader?: boolean;
+  onLogout?: () => void;
+  logoutDisabled?: boolean;
 }
 
 export function POSLayout({ 
   children, 
   userName,
   userRole,
-  showHeader = true 
+  showHeader = true,
+  onLogout,
+  logoutDisabled = false
 }: POSLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {showHeader && (
-        <POSHeader userName={userName} userRole={userRole} />
+        <POSHeader userName={userName} userRole={userRole} onLogout={onLogout} logoutDisabled={logoutDisabled} />
       )}
       <main className="flex-1 flex overflow-hidden">
         {children}

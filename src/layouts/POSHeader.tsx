@@ -1,5 +1,6 @@
-import { Clock, MapPin, User, Monitor } from 'lucide-react';
+import { Clock, MapPin, User, Monitor, LogOut, ShieldCheck, Crown } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { cn } from '@/lib/utils';
 
 interface POSHeaderProps {
   location?: string;
@@ -7,6 +8,8 @@ interface POSHeaderProps {
   userName?: string;
   userRole?: string;
   showClock?: boolean;
+  onLogout?: () => void;
+  logoutDisabled?: boolean;
 }
 
 export function POSHeader({ 
@@ -14,7 +17,9 @@ export function POSHeader({
   cashRegister = "Caja 1",
   userName = "Usuario",
   userRole = "Cajero",
-  showClock = true 
+  showClock = true,
+  onLogout,
+  logoutDisabled = false
 }: POSHeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -62,16 +67,37 @@ export function POSHeader({
       </div>
 
       {/* Usuario y Reloj */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 bg-secondary rounded-full flex items-center justify-center">
             <User className="h-5 w-5 text-secondary-foreground" />
           </div>
           <div className="hidden sm:block">
             <p className="text-sm font-medium">{userName}</p>
-            <p className="text-xs text-muted-foreground">{userRole}</p>
+            <div className={cn(
+              'badge-pos mt-1 w-fit',
+              userRole === 'Administrador' && 'badge-accent',
+              userRole === 'Supervisor' && 'badge-warning',
+              userRole === 'Cajero' && 'badge-info'
+            )}>
+              {userRole === 'Administrador' && <Crown className="h-3.5 w-3.5" />}
+              {userRole === 'Supervisor' && <ShieldCheck className="h-3.5 w-3.5" />}
+              {userRole === 'Cajero' && <User className="h-3.5 w-3.5" />}
+              {userRole}
+            </div>
           </div>
         </div>
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            disabled={logoutDisabled}
+            className="h-9 px-3 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 flex items-center gap-2 text-sm font-semibold disabled:opacity-50"
+            title={logoutDisabled ? "Cierra caja antes de salir" : "Salir"}
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden md:inline">Salir</span>
+          </button>
+        )}
 
         {showClock && (
           <div className="text-right">
