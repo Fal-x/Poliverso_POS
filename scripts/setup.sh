@@ -4,16 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker no esta instalado. Instala Docker Desktop y vuelve a intentar." >&2
-  exit 1
-fi
-
-if ! command -v docker compose >/dev/null 2>&1; then
-  echo "Docker Compose no esta disponible. Actualiza Docker Desktop." >&2
-  exit 1
-fi
-
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js no esta instalado. Instala Node 20+ y vuelve a intentar." >&2
   exit 1
@@ -24,9 +14,17 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v psql >/dev/null 2>&1; then
+  echo "psql no esta disponible. Instala PostgreSQL client (postgresql-client)." >&2
+  exit 1
+fi
+
 if [ ! -f .env ]; then
   cat <<'ENV' > .env
-DATABASE_URL="postgresql://poliverse_app:poliverse_password@localhost:5433/poliverse_db?schema=public"
+DATABASE_URL="postgresql://poliverse_app:change_me@localhost:5432/poliverse_db?schema=public"
+API_PORT=3001
+VITE_API_URL="http://localhost:3001/api/v1"
+JWT_SECRET="change_me"
 ENV
   echo ".env creado con DATABASE_URL por defecto."
 fi
@@ -42,32 +40,14 @@ if [ -z "${DATABASE_URL_VALUE}" ]; then
   exit 1
 fi
 
-echo "Levantando Postgres con Docker..."
-docker compose up -d db
-
 if command -v pg_isready >/dev/null 2>&1; then
+  PGHOST="$(echo "${DATABASE_URL_VALUE}" | sed -E 's#^postgresql://[^@]+@([^:/?]+).*$#\1#')"
+  PGPORT="$(echo "${DATABASE_URL_VALUE}" | sed -E 's#^postgresql://[^@]+@[^:/?]+:([0-9]+).*$#\1#')"
+  export PGHOST PGPORT
   ./scripts/wait-for-postgres.sh
 else
-  echo "pg_isready no esta disponible localmente; esperando 5s..."
-  sleep 5
+  echo "pg_isready no esta disponible; se omite validacion de disponibilidad de PostgreSQL."
 fi
-
-echo "Verificando base de datos..."
-docker compose exec -T db psql -U postgres -v ON_ERROR_STOP=1 <<'SQL'
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'poliverse_app') THEN
-    CREATE ROLE poliverse_app WITH LOGIN PASSWORD 'poliverse_password';
-  END IF;
-END
-$$;
-
-SELECT 'CREATE DATABASE poliverse_db OWNER poliverse_app'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'poliverse_db')
-\\gexec
-
-GRANT ALL PRIVILEGES ON DATABASE poliverse_db TO poliverse_app;
-SQL
 
 echo "Instalando dependencias..."
 npm install

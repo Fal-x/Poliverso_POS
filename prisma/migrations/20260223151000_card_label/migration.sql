@@ -1,0 +1,2 @@
+ALTER TABLE "Card"
+  ADD COLUMN IF NOT EXISTS "label" TEXT;

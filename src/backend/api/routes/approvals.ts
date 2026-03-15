@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/backend/prisma';
 import { requireAuth } from '../middleware/auth';
 import { ok, fail } from '../utils/response';
+import { sanitizeDigits, sanitizeId, sanitizeText, sanitizeUuid } from '@/backend/utils/sanitize';
 
 export async function approvalRoutes(app: FastifyInstance) {
   app.post('/supervisor-approvals', { preHandler: [requireAuth] }, async (req, reply) => {
@@ -16,18 +17,26 @@ export async function approvalRoutes(app: FastifyInstance) {
       supervisor_code: string;
     };
 
-    if (!body?.site_id || !body?.requested_by_user_id || !body?.entity_id || !body?.supervisor_code || !body?.reason) {
+    const siteId = sanitizeUuid(body?.site_id);
+    const requestedByUserId = sanitizeUuid(body?.requested_by_user_id);
+    const action = sanitizeId(body?.action, 50);
+    const entityType = sanitizeId(body?.entity_type, 50);
+    const entityId = sanitizeId(body?.entity_id, 100);
+    const reason = sanitizeText(body?.reason, 400);
+    const supervisorCode = sanitizeDigits(body?.supervisor_code, 8);
+
+    if (!siteId || !requestedByUserId || !action || !entityType || !entityId || !supervisorCode || !reason) {
       return fail(reply, 'VALIDATION_ERROR', 'Campos requeridos incompletos');
     }
 
     const authUser = (req as any).authUser as { id: string } | undefined;
-    if (authUser?.id && authUser.id !== body.requested_by_user_id) {
+    if (authUser?.id && authUser.id !== requestedByUserId) {
       return fail(reply, 'FORBIDDEN', 'Usuario no autorizado para solicitar aprobación', 403);
     }
 
     const supervisors = await prisma.userAssignment.findMany({
       where: {
-        siteId: body.site_id,
+        siteId,
         isActive: true,
         role: { name: { in: ['SUPERVISOR', 'ADMIN'] } },
       },
@@ -45,7 +54,7 @@ export async function approvalRoutes(app: FastifyInstance) {
       if (!authCode) continue;
       if (authCode.expiresAt <= now) continue;
       if (authCode.lockedUntil && authCode.lockedUntil > now) continue;
-      if (await bcrypt.compare(body.supervisor_code, authCode.codeHash)) {
+      if (await bcrypt.compare(supervisorCode, authCode.codeHash)) {
         approvedById = assignment.user.id;
         break;
       }
@@ -57,13 +66,13 @@ export async function approvalRoutes(app: FastifyInstance) {
 
     const approval = await prisma.supervisorApproval.create({
       data: {
-        siteId: body.site_id,
-        action: body.action as any,
-        entityType: body.entity_type as any,
-        entityId: body.entity_id,
-        requestedById: body.requested_by_user_id,
+        siteId,
+        action: action as any,
+        entityType: entityType as any,
+        entityId,
+        requestedById: requestedByUserId,
         approvedById,
-        reason: body.reason,
+        reason,
       },
     });
 

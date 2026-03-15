@@ -3,5 +3,5 @@ import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
-  seed: "tsx primas/seed.ts",
+  seed: "npx tsx prisma/seed.ts",
 });

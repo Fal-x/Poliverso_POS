@@ -13,12 +13,6 @@ Este documento describe los payloads mínimos esperados para operar caja en POLI
   "shift_id": "uuid",
   "opened_by_user_id": "uuid",
   "opening_cash_amount": "150000.00",
-  "denominations": {
-    "50000": 2,
-    "20000": 2,
-    "10000": 2,
-    "5000": 2
-  },
   "approval_id": null
 }
 ```
@@ -52,12 +46,6 @@ Este documento describe los payloads mínimos esperados para operar caja en POLI
 {
   "closed_by_user_id": "uuid",
   "closing_cash_amount": "518000.00",
-  "denominations": {
-    "50000": 6,
-    "20000": 6,
-    "10000": 1,
-    "5000": 4
-  },
   "close_reason": "Diferencia por billete falso",
   "approval_id": "uuid"
 }

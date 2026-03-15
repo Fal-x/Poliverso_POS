@@ -7,9 +7,11 @@ import LoginPage from "./pages/LoginPage";
 import CashierDashboard from "./pages/CashierDashboard";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import ProgramsDashboard from "./pages/ProgramsDashboard";
 import NotFound from "./pages/NotFound";
 import { canAccessRoute, getAuthUser } from "./lib/auth";
 import type { UserRole } from "./types/pos.types";
+import { GlobalNotifications } from "./components/notifications/GlobalNotifications";
 
 const queryClient = new QueryClient();
 
@@ -39,7 +41,8 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <GlobalNotifications />
         <Routes>
           {/* Redirigir raíz a login */}
           <Route path="/" element={<Navigate to="/login" replace />} />
@@ -59,6 +62,10 @@ const App = () => (
           <Route
             path="/admin"
             element={<ProtectedRoute requiredRole="admin" element={<AdminDashboard />} />}
+          />
+          <Route
+            path="/programs"
+            element={<ProtectedRoute requiredRole="cashier" element={<ProgramsDashboard />} />}
           />
           
           {/* 404 */}

@@ -1,10 +1,12 @@
 /* eslint-disable no-console */
-import { PrismaClient, Prisma, RoleName, PermissionCode, UserStatus, SiteStatus, ShiftStatus, PaymentMethod, SaleStatus, SaleCategory, LedgerEventType, LedgerEntrySide, LedgerAccount, InventoryCategory, InventoryMovementType, AttractionUsageType, ServiceStatus, AuditAction, ApprovalAction, EntityType, CardStatus, CashSessionStatus, CashCountType, CustomerDocumentType } from "@prisma/client";
+import { PrismaClient, Prisma, RoleName, PermissionCode, UserStatus, SiteStatus, ShiftStatus, PaymentMethod, SaleStatus, SaleCategory, LedgerEventType, LedgerEntrySide, LedgerAccount, InventoryCategory, InventoryMovementType, AttractionUsageType, ServiceStatus, AuditAction, ApprovalAction, EntityType, CardStatus, CashSessionStatus, CustomerDocumentType, TipoOperacionVendible } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 const D = (n: number | string) => new Prisma.Decimal(n);
+const ESP_TOKEN_PREFIX = "dev-esp-token";
+const ESP_HMAC_PREFIX = "dev-esp-hmac-secret";
 
 // ---------- Helpers ----------
 async function hash(pw: string) {
@@ -15,6 +17,12 @@ async function hash(pw: string) {
 function nowMinusDays(days: number) {
   const dt = new Date();
   dt.setDate(dt.getDate() - days);
+  return dt;
+}
+
+function daysAgoAt(days: number, hour: number, minute = 0) {
+  const dt = nowMinusDays(days);
+  dt.setHours(hour, minute, 0, 0);
   return dt;
 }
 
@@ -146,12 +154,16 @@ async function main() {
       minRechargeAmount: D(5000),
       pointsPerCurrency: 1,
       currencyUnit: 1000,
+      dailySalesGoal: D(3500000),
+      creditTermDays: 15,
     },
     create: {
       siteId: site.id,
       minRechargeAmount: D(5000),
       pointsPerCurrency: 1,
       currencyUnit: 1000,
+      dailySalesGoal: D(3500000),
+      creditTermDays: 15,
     },
   });
 
@@ -358,46 +370,91 @@ async function main() {
     }
   }
 
-  // 6) Products (POS catálogo)
-  // Incluye: plástico, gift card, snacks, servicios placeholders (aunque Service está separado), otros.
+  // 6) Products (POS catálogo actualizado)
+  // Se carga exactamente con base en tu matriz operativa compartida.
   const products = [
-    { name: "Tarjeta Plástico POLIVERSE", sku: "CARD-PLASTIC", category: SaleCategory.CARD_PLASTIC, price: D(5000) },
-    { name: "Tarjeta Regalo (plástico)", sku: "GIFT-PLASTIC", category: SaleCategory.GIFT_CARD, price: D(5000) },
-    // Snacks
-    { name: "Gaseosa 400ml", sku: "SNACK-SODA-400", category: SaleCategory.SNACKS, price: D(6000) },
-    { name: "Agua 600ml", sku: "SNACK-WATER-600", category: SaleCategory.SNACKS, price: D(4000) },
-    { name: "Crispetas", sku: "SNACK-POPCORN", category: SaleCategory.SNACKS, price: D(8000) },
-    { name: "Mekato mixto", sku: "SNACK-MEKATO", category: SaleCategory.SNACKS, price: D(5000) },
-    // Otros
-    { name: "Accesorio / Souvenir", sku: "OTHER-SOUVENIR", category: SaleCategory.OTHER, price: D(12000) },
+    // Parque
+    { name: "Tarjetas", sku: "PTA-001", category: SaleCategory.CARD_PLASTIC, analyticsCategory: "Parque", analyticsSubcategory: "Tarjetas", price: D(3000) },
+
+    // Snacks - Granizados
+    { name: "Granizados 12ml", sku: "SGR-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Granizados", price: D(10000) },
+    { name: "Granizados 16ml", sku: "SGR-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Granizados", price: D(14000) },
+
+    // Snacks - Crispetas
+    { name: "Crispetas", sku: "SCR-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Crispetas", price: D(3000) },
+
+    // Snacks - Dulces
+    { name: "Gomitas", sku: "SDU-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Dulces", price: D(0) },
+    { name: "Chocolatina 1", sku: "SDU-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Dulces", price: D(0) },
+    { name: "Chocolatina 2", sku: "SDU-003", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Dulces", price: D(0) },
+    { name: "Chocolatina 3", sku: "SDU-004", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Dulces", price: D(0) },
+
+    // Snacks - Mekatos
+    { name: "Mekato 1", sku: "SME-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 2", sku: "SME-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 3", sku: "SME-003", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 4", sku: "SME-004", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 5", sku: "SME-005", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 6", sku: "SME-006", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 7", sku: "SME-007", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 8", sku: "SME-008", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 9", sku: "SME-009", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+    { name: "Mekato 10", sku: "SME-010", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Mekatos", price: D(0) },
+
+    // Snacks - Bebidas
+    { name: "Gaseosa 1", sku: "SBE-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Gaseosa 2", sku: "SBE-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Gaseosa 3", sku: "SBE-003", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Gaseosa 4", sku: "SBE-004", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Gaseosa 5", sku: "SBE-005", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Agua 1", sku: "SBE-006", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Agua 2", sku: "SBE-007", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Agua 3", sku: "SBE-008", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Agua 4", sku: "SBE-009", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Jugo 1", sku: "SBE-010", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Jugo 2", sku: "SBE-011", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+    { name: "Jugo 3", sku: "SBE-012", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Bebidas", price: D(0) },
+
+    // Snacks - Otros varios
+    { name: "Kit de Pintarte", sku: "SOV-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Otros Varios", price: D(35000) },
+    { name: "Kit de Pinceladas", sku: "SOV-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Otros Varios", price: D(50000) },
+
+    // Snacks - Combos
+    { name: "Granizado 12ml + Crispeta", sku: "SCO-001", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Combos", price: D(12000) },
+    { name: "Granizado 16ml + Crispeta + Chocolatina", sku: "SCO-002", category: SaleCategory.SNACKS, analyticsCategory: "Snacks", analyticsSubcategory: "Combos", price: D(16000) },
   ];
 
   for (const p of products) {
     await prisma.product.upsert({
       where: { siteId_sku: { siteId: site.id, sku: p.sku! } },
-      update: { name: p.name, price: p.price, category: p.category, isActive: true },
+      update: {
+        name: p.name,
+        price: p.price,
+        category: p.category,
+        analyticsCategory: p.analyticsCategory,
+        analyticsSubcategory: p.analyticsSubcategory,
+        isActive: true,
+      },
       create: { siteId: site.id, ...p, isActive: true },
     });
   }
 
-  const productCardPlastic = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "CARD-PLASTIC" } });
-  const productGiftPlastic = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "GIFT-PLASTIC" } });
-  const productSoda = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "SNACK-SODA-400" } });
-  const productPopcorn = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "SNACK-POPCORN" } });
-  const productSouvenir = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "OTHER-SOUVENIR" } });
+  const productCardPlastic = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "PTA-001" } });
+  const productGranizado12 = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "SGR-001" } });
+  const productCrispetas = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "SCR-001" } });
+  const productKitPintarte = await prisma.product.findFirstOrThrow({ where: { siteId: site.id, sku: "SOV-001" } });
 
   // 7) Inventory items (cards, prizes, snacks)
   const inventoryItems = [
     // Tarjetas físicas
-    { name: "Tarjeta Plástico POLIVERSE", sku: "INV-CARD-PLASTIC", category: InventoryCategory.CARD_PLASTIC },
-    { name: "Tarjeta Regalo (plástico)", sku: "INV-GIFT-PLASTIC", category: InventoryCategory.CARD_PLASTIC },
+    { name: "Tarjetas", sku: "INV-PTA-001", category: InventoryCategory.CARD_PLASTIC },
     // Premios
     { name: "Pelota Saltarina", sku: "PRIZE-BALL", category: InventoryCategory.PRIZE },
     { name: "Carro Mini", sku: "PRIZE-CAR", category: InventoryCategory.PRIZE },
     { name: "Muñeco Pequeño", sku: "PRIZE-DOLL", category: InventoryCategory.PRIZE },
     // Snacks
-    { name: "Gaseosa 400ml", sku: "INV-SNACK-SODA-400", category: InventoryCategory.SNACK },
-    { name: "Crispetas", sku: "INV-SNACK-POPCORN", category: InventoryCategory.SNACK },
+    { name: "Granizados 12ml", sku: "INV-SGR-001", category: InventoryCategory.SNACK },
+    { name: "Crispetas", sku: "INV-SCR-001", category: InventoryCategory.SNACK },
   ];
 
   for (const it of inventoryItems) {
@@ -408,11 +465,10 @@ async function main() {
     });
   }
 
-  const invCardPlastic = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-CARD-PLASTIC" } });
-  const invGiftPlastic = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-GIFT-PLASTIC" } });
+  const invCardPlastic = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-PTA-001" } });
   const invPrizeBall = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "PRIZE-BALL" } });
-  const invSnackSoda = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-SNACK-SODA-400" } });
-  const invSnackPop = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-SNACK-POPCORN" } });
+  const invSnackGranizado = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-SGR-001" } });
+  const invSnackCrispetas = await prisma.inventoryItem.findFirstOrThrow({ where: { siteId: site.id, sku: "INV-SCR-001" } });
 
   // 8) Shifts (uno cerrado histórico + uno abierto actual)
   // Shift cerrado (ayer)
@@ -434,7 +490,7 @@ async function main() {
     },
   });
 
-  // Shift abierto (hoy)
+  // Shift de hoy (cerrado para evitar conflictos al abrir caja en UI)
   const shiftOpen = await prisma.shift.create({
     data: {
       siteId: site.id,
@@ -443,8 +499,13 @@ async function main() {
       openedById: cashier2.id,
       openedAt: nowMinusDays(0),
       openingCash: D(150000),
-      status: ShiftStatus.OPEN,
-      notes: "Turno abierto seed",
+      status: ShiftStatus.CLOSED,
+      closedById: supervisor.id,
+      closedAt: new Date(),
+      expectedCash: D(150000),
+      countedCash: D(150000),
+      cashDiscrepancy: D(0),
+      notes: "Turno seed (cerrado para demo)",
     },
   });
 
@@ -468,29 +529,6 @@ async function main() {
     },
   });
 
-  await prisma.cashCount.createMany({
-    data: [
-      {
-        siteId: site.id,
-        cashSessionId: cashSessionClosed.id,
-        type: CashCountType.OPENING,
-        denominations: { "100000": 1, "50000": 2, "20000": 3, "10000": 1 },
-        totalAmount: D(200000),
-        countedByUserId: cashier1.id,
-        createdAt: shiftClosed.openedAt,
-      },
-      {
-        siteId: site.id,
-        cashSessionId: cashSessionClosed.id,
-        type: CashCountType.CLOSING,
-        denominations: { "50000": 6, "20000": 6, "10000": 1, "5000": 4 },
-        totalAmount: D(518000),
-        countedByUserId: supervisor.id,
-        createdAt: shiftClosed.closedAt ?? nowMinusDays(1),
-      },
-    ],
-  });
-
   const cashSessionOpen = await prisma.cashSession.create({
     data: {
       siteId: site.id,
@@ -501,19 +539,12 @@ async function main() {
       openedAt: shiftOpen.openedAt,
       openingCashAmount: D(150000),
       expectedCashAmount: D(150000),
-      status: CashSessionStatus.OPEN,
-    },
-  });
-
-  await prisma.cashCount.create({
-    data: {
-      siteId: site.id,
-      cashSessionId: cashSessionOpen.id,
-      type: CashCountType.OPENING,
-      denominations: { "50000": 2, "20000": 2, "10000": 2, "5000": 2 },
-      totalAmount: D(150000),
-      countedByUserId: cashier2.id,
-      createdAt: shiftOpen.openedAt,
+      status: CashSessionStatus.CLOSED,
+      closedById: supervisor.id,
+      closedAt: new Date(),
+      closingCashAmount: D(150000),
+      cashDifference: D(0),
+      closeReason: "Cierre seed para evitar conflicto",
     },
   });
 
@@ -523,17 +554,16 @@ async function main() {
     data: [
       // Apertura de tarjetas
       { siteId: site.id, itemId: invCardPlastic.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 200, unitCost: D(1500), occurredAt: nowMinusDays(7), notes: "Stock inicial tarjetas" },
-      { siteId: site.id, itemId: invGiftPlastic.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 50, unitCost: D(1500), occurredAt: nowMinusDays(7), notes: "Stock inicial gift cards" },
 
       // Apertura de snacks
-      { siteId: site.id, itemId: invSnackSoda.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 120, unitCost: D(2500), occurredAt: nowMinusDays(7), notes: "Stock inicial gaseosas" },
-      { siteId: site.id, itemId: invSnackPop.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 80, unitCost: D(3000), occurredAt: nowMinusDays(7), notes: "Stock inicial crispetas" },
+      { siteId: site.id, itemId: invSnackGranizado.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 120, unitCost: D(2500), occurredAt: nowMinusDays(7), notes: "Stock inicial granizados" },
+      { siteId: site.id, itemId: invSnackCrispetas.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 80, unitCost: D(3000), occurredAt: nowMinusDays(7), notes: "Stock inicial crispetas" },
 
       // Apertura de premios
       { siteId: site.id, itemId: invPrizeBall.id, shiftId: shiftClosed.id, performedById: admin.id, type: InventoryMovementType.OPENING_COUNT, quantity: 60, unitCost: D(4000), occurredAt: nowMinusDays(7), notes: "Stock inicial premios" },
 
       // Ajuste por daño (con nota)
-      { siteId: site.id, itemId: invSnackSoda.id, shiftId: shiftClosed.id, performedById: supervisor.id, type: InventoryMovementType.ADJUSTMENT, quantity: -2, unitCost: D(2500), occurredAt: nowMinusDays(2), notes: "Daño / merma" },
+      { siteId: site.id, itemId: invSnackGranizado.id, shiftId: shiftClosed.id, performedById: supervisor.id, type: InventoryMovementType.ADJUSTMENT, quantity: -2, unitCost: D(2500), occurredAt: nowMinusDays(2), notes: "Daño / merma" },
     ],
   });
 
@@ -563,27 +593,31 @@ async function main() {
     { code: "EXTRA-04", name: "Atracción Extra 04", cost: 7000, readers: 1 },
   ];
 
-  const attractions: Record<string, { id: string; cost: Prisma.Decimal; readerIds: string[] }> = {};
+  const attractions: Record<string, { id: string; name: string; cost: Prisma.Decimal; readerIds: string[] }> = {};
 
   for (const spec of attractionSpecs) {
+    const pointsCost = Math.max(1, Math.round(spec.cost / 1000));
     const a = await prisma.attraction.upsert({
       where: { siteId_code: { siteId: site.id, code: spec.code } },
-      update: { name: spec.name, cost: D(spec.cost), isActive: true },
-      create: { siteId: site.id, code: spec.code, name: spec.name, cost: D(spec.cost), isActive: true },
+      update: { name: spec.name, price: D(spec.cost), costPoints: pointsCost, type: "SKILL", status: "ACTIVE", duration: 0 },
+      create: { siteId: site.id, code: spec.code, name: spec.name, price: D(spec.cost), costPoints: pointsCost, type: "SKILL", status: "ACTIVE", duration: 0 },
     });
 
     const readerIds: string[] = [];
     for (let i = 1; i <= spec.readers; i++) {
       const code = `${spec.code}-R${i}`;
+      const readerToken = `${ESP_TOKEN_PREFIX}-${code}`;
+      const readerHmacSecret = `${ESP_HMAC_PREFIX}-${code}`;
+      const tokenHash = await hash(readerToken);
       const r = await prisma.reader.upsert({
         where: { attractionId_code: { attractionId: a.id, code } },
-        update: { position: i, isActive: true },
-        create: { siteId: site.id, attractionId: a.id, code, position: i, isActive: true },
+        update: { position: i, isActive: true, apiTokenHash: tokenHash, hmacSecret: readerHmacSecret },
+        create: { siteId: site.id, attractionId: a.id, code, position: i, isActive: true, apiTokenHash: tokenHash, hmacSecret: readerHmacSecret },
       });
       readerIds.push(r.id);
     }
 
-    attractions[spec.code] = { id: a.id, cost: a.cost, readerIds };
+    attractions[spec.code] = { id: a.id, name: a.name, cost: a.price, readerIds };
   }
 
   // 11) Cards (UIDs) + starting balances via CardBalanceEvent
@@ -704,6 +738,162 @@ async function main() {
     create: { siteId: site.id, name: "Vacacional Semana", price: D(220000), isActive: true },
   });
 
+  // 12.1) Estructura unificada vendible: Categoria / Subcategoria / ItemVendible
+  const categoriaCache = new Map<string, string>();
+  const subcategoriaCache = new Map<string, string>();
+
+  const ensureCategoria = async (nombre: string, codigo?: string | null) => {
+    const key = nombre.trim().toLowerCase();
+    const cached = categoriaCache.get(key);
+    if (cached) return cached;
+    const categoria = await prisma.categoria.upsert({
+      where: { siteId_nombre: { siteId: site.id, nombre } },
+      update: { codigo: codigo ?? undefined, activo: true },
+      create: { siteId: site.id, nombre, codigo: codigo ?? null, activo: true },
+    });
+    categoriaCache.set(key, categoria.id);
+    return categoria.id;
+  };
+
+  const ensureSubcategoria = async (categoriaId: string, nombre: string, codigo?: string | null) => {
+    const key = `${categoriaId}:${nombre.trim().toLowerCase()}`;
+    const cached = subcategoriaCache.get(key);
+    if (cached) return cached;
+    const subcategoria = await prisma.subcategoria.upsert({
+      where: { siteId_categoriaId_nombre: { siteId: site.id, categoriaId, nombre } },
+      update: { codigo: codigo ?? undefined, activo: true },
+      create: { siteId: site.id, categoriaId, nombre, codigo: codigo ?? null, activo: true },
+    });
+    subcategoriaCache.set(key, subcategoria.id);
+    return subcategoria.id;
+  };
+
+  // Productos del POS como items vendibles tipo PRODUCTO
+  for (const p of products) {
+    const categoriaNombre = p.analyticsCategory ?? "Otros";
+    const subcategoriaNombre = p.analyticsSubcategory ?? "General";
+    const categoriaId = await ensureCategoria(categoriaNombre);
+    const subcategoriaId = await ensureSubcategoria(categoriaId, subcategoriaNombre);
+    await prisma.itemVendible.upsert({
+      where: { siteId_codigo: { siteId: site.id, codigo: p.sku ?? `PROD-${p.name.replace(/\s+/g, "-").toUpperCase()}` } },
+      update: {
+        categoriaId,
+        subcategoriaId,
+        nombre: p.name,
+        tipoOperacion: TipoOperacionVendible.PRODUCTO,
+        tieneInventario: [SaleCategory.CARD_PLASTIC, SaleCategory.GIFT_CARD, SaleCategory.SNACKS, SaleCategory.PRIZE].includes(p.category),
+        usaSaldoElectronico: p.category === SaleCategory.RECHARGE,
+        usaPuntos: false,
+        precioBase: p.price,
+        activo: true,
+      },
+      create: {
+        siteId: site.id,
+        categoriaId,
+        subcategoriaId,
+        codigo: p.sku ?? `PROD-${p.name.replace(/\s+/g, "-").toUpperCase()}`,
+        nombre: p.name,
+        tipoOperacion: TipoOperacionVendible.PRODUCTO,
+        tieneInventario: [SaleCategory.CARD_PLASTIC, SaleCategory.GIFT_CARD, SaleCategory.SNACKS, SaleCategory.PRIZE].includes(p.category),
+        usaSaldoElectronico: p.category === SaleCategory.RECHARGE,
+        usaPuntos: false,
+        precioBase: p.price,
+        activo: true,
+      },
+    });
+  }
+
+  // Servicios como items vendibles tipo SERVICIO/PROGRAMA/EVENTO
+  const serviceCatalogRows = [
+    serviceCumpleBasico,
+    serviceVacacional,
+  ];
+  for (const service of serviceCatalogRows) {
+    const lower = service.name.toLowerCase();
+    const tipoOperacion =
+      lower.includes("cumple")
+        ? TipoOperacionVendible.EVENTO
+        : lower.includes("vacacional")
+          ? TipoOperacionVendible.PROGRAMA
+          : TipoOperacionVendible.SERVICIO;
+    const categoriaNombre =
+      tipoOperacion === TipoOperacionVendible.EVENTO
+        ? "Eventos y celebraciones"
+        : tipoOperacion === TipoOperacionVendible.PROGRAMA
+          ? "Programas"
+          : "Servicios";
+    const subcategoriaNombre =
+      tipoOperacion === TipoOperacionVendible.EVENTO
+        ? "Cumpleaños"
+        : tipoOperacion === TipoOperacionVendible.PROGRAMA
+          ? "Vacacionales"
+          : "Servicios";
+    const categoriaId = await ensureCategoria(categoriaNombre);
+    const subcategoriaId = await ensureSubcategoria(categoriaId, subcategoriaNombre);
+    const serviceCode = `SRV-${service.name.replace(/[^a-zA-Z0-9]+/g, "-").toUpperCase()}`;
+
+    await prisma.itemVendible.upsert({
+      where: { siteId_codigo: { siteId: site.id, codigo: serviceCode } },
+      update: {
+        categoriaId,
+        subcategoriaId,
+        nombre: service.name,
+        tipoOperacion,
+        tieneInventario: false,
+        usaSaldoElectronico: false,
+        usaPuntos: false,
+        precioBase: service.price,
+        activo: service.isActive,
+      },
+      create: {
+        siteId: site.id,
+        categoriaId,
+        subcategoriaId,
+        codigo: serviceCode,
+        nombre: service.name,
+        tipoOperacion,
+        tieneInventario: false,
+        usaSaldoElectronico: false,
+        usaPuntos: false,
+        precioBase: service.price,
+        activo: service.isActive,
+      },
+    });
+  }
+
+  // Atracciones como items vendibles tipo USO
+  const usosCategoriaId = await ensureCategoria("Parque");
+  const usosSubcategoriaId = await ensureSubcategoria(usosCategoriaId, "Usos");
+  for (const [code, attractionData] of Object.entries(attractions)) {
+    await prisma.itemVendible.upsert({
+      where: { siteId_codigo: { siteId: site.id, codigo: code } },
+      update: {
+        categoriaId: usosCategoriaId,
+        subcategoriaId: usosSubcategoriaId,
+        nombre: attractionData.name,
+        tipoOperacion: TipoOperacionVendible.USO,
+        tieneInventario: false,
+        usaSaldoElectronico: true,
+        usaPuntos: true,
+        precioBase: attractionData.cost,
+        activo: true,
+      },
+      create: {
+        siteId: site.id,
+        categoriaId: usosCategoriaId,
+        subcategoriaId: usosSubcategoriaId,
+        codigo: code,
+        nombre: attractionData.name,
+        tipoOperacion: TipoOperacionVendible.USO,
+        tieneInventario: false,
+        usaSaldoElectronico: true,
+        usaPuntos: true,
+        precioBase: attractionData.cost,
+        activo: true,
+      },
+    });
+  }
+
   const serviceSale1 = await prisma.serviceSale.create({
     data: {
       siteId: site.id,
@@ -748,6 +938,222 @@ async function main() {
     entityId: leServicePay1.id,
     after: { note: "Seed service payment ledger" },
   });
+
+  // 12.5) POLIKid demo: estudiantes, inscripciones y abonos para poblar cartera/programas
+  const polikidsSeed = [
+    {
+      firstName: "Sofia",
+      lastName: "Mejia",
+      documentType: CustomerDocumentType.TI,
+      documentNumber: "10324411",
+      birthDate: new Date("2017-05-14"),
+      phone: "3001239087",
+      email: "ana.mejia@example.com",
+      guardianName: "Ana Mejia",
+      guardianPhone: "3001239087",
+      status: "ACTIVE" as const,
+      notes: "Interes en robotica y arte.",
+      enrollments: [
+        {
+          programName: "Robotica Kids",
+          groupName: "G1",
+          startsAt: new Date("2026-03-01"),
+          endsAt: new Date("2026-06-30"),
+          dueDate: new Date("2026-03-08"),
+          totalAmount: D(280000),
+          discountAmount: D(20000),
+          finalAmount: D(260000),
+          payments: [
+            { amount: D(180000), method: PaymentMethod.TRANSFER_ACCOUNT_1, createdAt: new Date("2026-03-02T20:10:00.000Z"), createdById: cashier1.id, notes: "Abono inicial marzo" },
+          ],
+        },
+        {
+          programName: "Arte Sensorial",
+          groupName: "Clase abierta",
+          startsAt: new Date("2026-03-05"),
+          endsAt: new Date("2026-03-29"),
+          dueDate: new Date("2026-03-05"),
+          totalAmount: D(55000),
+          discountAmount: D(0),
+          finalAmount: D(55000),
+          payments: [
+            { amount: D(55000), method: PaymentMethod.CASH, createdAt: new Date("2026-03-05T16:20:00.000Z"), createdById: cashier2.id, notes: "Clase sabatina pagada" },
+          ],
+        },
+      ],
+    },
+    {
+      firstName: "Samuel",
+      lastName: "Ortiz",
+      documentType: CustomerDocumentType.TI,
+      documentNumber: "88421190",
+      birthDate: new Date("2019-08-01"),
+      phone: "3013334412",
+      email: "lina.ortiz@example.com",
+      guardianName: "Lina Ortiz",
+      guardianPhone: "3013334412",
+      status: "ACTIVE" as const,
+      notes: "Prefiere cocina y actividades manuales.",
+      enrollments: [
+        {
+          programName: "Mini Chefs",
+          groupName: "G3",
+          startsAt: new Date("2026-03-01"),
+          endsAt: new Date("2026-05-31"),
+          dueDate: new Date("2026-03-10"),
+          totalAmount: D(240000),
+          discountAmount: D(0),
+          finalAmount: D(240000),
+          payments: [
+            { amount: D(120000), method: PaymentMethod.NEQUI, createdAt: new Date("2026-03-03T19:00:00.000Z"), createdById: cashier1.id, notes: "Abono 1" },
+            { amount: D(120000), method: PaymentMethod.CASH, createdAt: new Date("2026-03-09T20:40:00.000Z"), createdById: cashier1.id, notes: "Pago saldo" },
+          ],
+        },
+      ],
+    },
+    {
+      firstName: "Valeria",
+      lastName: "Torres",
+      documentType: CustomerDocumentType.TI,
+      documentNumber: "77112233",
+      birthDate: new Date("2016-11-23"),
+      phone: "3158001140",
+      email: "carlos.torres@example.com",
+      guardianName: "Carlos Torres",
+      guardianPhone: "3158001140",
+      status: "ACTIVE" as const,
+      notes: "Inscripcion con pausa medica temporal.",
+      enrollments: [
+        {
+          programName: "Ballet Creativo",
+          groupName: "G2",
+          startsAt: new Date("2026-02-15"),
+          endsAt: new Date("2026-06-15"),
+          dueDate: new Date("2026-03-01"),
+          totalAmount: D(320000),
+          discountAmount: D(20000),
+          finalAmount: D(300000),
+          payments: [
+            { amount: D(20000), method: PaymentMethod.CREDIT_CARD, createdAt: new Date("2026-02-16T15:18:00.000Z"), createdById: cashier2.id, notes: "Reserva cupo" },
+            { amount: D(150000), method: PaymentMethod.TRANSFER, createdAt: new Date("2026-02-20T18:12:00.000Z"), createdById: cashier2.id, notes: "Abono febrero" },
+          ],
+          statusOverride: ServiceStatus.PARTIAL,
+        },
+      ],
+    },
+  ];
+
+  for (const polikid of polikidsSeed) {
+    const student = await prisma.polikidStudent.upsert({
+      where: {
+        siteId_documentType_documentNumber: {
+          siteId: site.id,
+          documentType: polikid.documentType,
+          documentNumber: polikid.documentNumber,
+        },
+      },
+      update: {
+        firstName: polikid.firstName,
+        lastName: polikid.lastName,
+        birthDate: polikid.birthDate,
+        phone: polikid.phone,
+        email: polikid.email,
+        guardianName: polikid.guardianName,
+        guardianPhone: polikid.guardianPhone,
+        status: polikid.status as any,
+        notes: polikid.notes,
+      },
+      create: {
+        siteId: site.id,
+        firstName: polikid.firstName,
+        lastName: polikid.lastName,
+        documentType: polikid.documentType,
+        documentNumber: polikid.documentNumber,
+        birthDate: polikid.birthDate,
+        phone: polikid.phone,
+        email: polikid.email,
+        guardianName: polikid.guardianName,
+        guardianPhone: polikid.guardianPhone,
+        status: polikid.status as any,
+        notes: polikid.notes,
+      },
+    });
+
+    for (const enrollmentSeed of polikid.enrollments) {
+      let enrollment = await prisma.programEnrollment.findFirst({
+        where: {
+          siteId: site.id,
+          studentId: student.id,
+          programName: enrollmentSeed.programName,
+          groupName: enrollmentSeed.groupName,
+        },
+      });
+
+      if (!enrollment) {
+        enrollment = await prisma.programEnrollment.create({
+          data: {
+            siteId: site.id,
+            studentId: student.id,
+            programName: enrollmentSeed.programName,
+            groupName: enrollmentSeed.groupName,
+            startsAt: enrollmentSeed.startsAt,
+            endsAt: enrollmentSeed.endsAt,
+            dueDate: enrollmentSeed.dueDate,
+            totalAmount: enrollmentSeed.totalAmount,
+            discountAmount: enrollmentSeed.discountAmount,
+            finalAmount: enrollmentSeed.finalAmount,
+            status: enrollmentSeed.statusOverride ?? ServiceStatus.OPEN,
+            createdAt: enrollmentSeed.startsAt,
+          },
+        });
+      } else {
+        enrollment = await prisma.programEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            startsAt: enrollmentSeed.startsAt,
+            endsAt: enrollmentSeed.endsAt,
+            dueDate: enrollmentSeed.dueDate,
+            totalAmount: enrollmentSeed.totalAmount,
+            discountAmount: enrollmentSeed.discountAmount,
+            finalAmount: enrollmentSeed.finalAmount,
+            status: enrollmentSeed.statusOverride ?? enrollment.status,
+          },
+        });
+      }
+
+      const existingPayments = await prisma.enrollmentPayment.count({
+        where: { enrollmentId: enrollment.id },
+      });
+
+      if (existingPayments === 0) {
+        await prisma.enrollmentPayment.createMany({
+          data: enrollmentSeed.payments.map((payment) => ({
+            siteId: site.id,
+            enrollmentId: enrollment.id,
+            amount: payment.amount,
+            method: payment.method,
+            notes: payment.notes,
+            createdById: payment.createdById,
+            createdAt: payment.createdAt,
+          })),
+        });
+      }
+
+      const paymentAggregate = await prisma.enrollmentPayment.aggregate({
+        where: { enrollmentId: enrollment.id },
+        _sum: { amount: true },
+      });
+      const totalPaid = paymentAggregate._sum.amount ?? D(0);
+      const pending = Prisma.Decimal.max(enrollment.finalAmount.sub(totalPaid), D(0));
+
+      await prisma.programEnrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          status: pending.lte(0) ? ServiceStatus.CLOSED : (enrollmentSeed.statusOverride ?? ServiceStatus.PARTIAL),
+        },
+      });
+    }
+  }
 
   // 13) Sales: (A) Venta tarjeta + recarga con bono (B) Snacks con pago mixto (C) Venta anulada (requiere aprobación)
   // Helpers para crear Sale con lines + payments + ledger.
@@ -840,16 +1246,37 @@ async function main() {
       case PaymentMethod.CASH:
         return LedgerAccount.CASH_ON_HAND;
       case PaymentMethod.TRANSFER:
+      case PaymentMethod.TRANSFER_ACCOUNT_1:
+      case PaymentMethod.TRANSFER_ACCOUNT_2:
+      case PaymentMethod.NEQUI:
         return LedgerAccount.BANK_TRANSFER;
       case PaymentMethod.QR:
         return LedgerAccount.QR_PROVIDER;
       case PaymentMethod.CARD:
+      case PaymentMethod.CREDIT_CARD:
         return LedgerAccount.CARD_PROCESSOR;
       case PaymentMethod.MIXED:
       default:
         // MIXED no debería venir aquí como "un solo payment"
         return LedgerAccount.CASH_ON_HAND;
     }
+  }
+
+  function seedContextForDay(daysAgo: number) {
+    if (daysAgo === 0) {
+      return {
+        shiftId: shiftOpen.id,
+        terminalId: terminalB.id,
+        cashSessionId: cashSessionOpen.id,
+        createdById: cashier2.id,
+      };
+    }
+    return {
+      shiftId: shiftClosed.id,
+      terminalId: terminalA.id,
+      cashSessionId: cashSessionClosed.id,
+      createdById: cashier1.id,
+    };
   }
 
   // A) Venta: 1 plástico + recarga 50.000 (bono 15.000) a tarjeta cards[0]
@@ -961,21 +1388,21 @@ async function main() {
     status: SaleStatus.PAID,
     createdAt: new Date(nowMinusDays(0).getTime() + 10 * 60 * 1000),
     lines: [
-      { productId: productSoda.id, category: SaleCategory.SNACKS, qty: 2, unitPrice: productSoda.price },
-      { productId: productPopcorn.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productPopcorn.price },
-      { productId: productSouvenir.id, category: SaleCategory.OTHER, qty: 1, unitPrice: productSouvenir.price },
+      { productId: productGranizado12.id, category: SaleCategory.SNACKS, qty: 2, unitPrice: productGranizado12.price },
+      { productId: productCrispetas.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productCrispetas.price },
+      { productId: productKitPintarte.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productKitPintarte.price },
     ],
     payments: [
-      { method: PaymentMethod.CASH, amount: D(10000) },
-      { method: PaymentMethod.QR, amount: D(22000), reference: "QR-CO-7712001" },
+      { method: PaymentMethod.CASH, amount: D(30000) },
+      { method: PaymentMethod.QR, amount: D(28000), reference: "QR-CO-7712001" },
     ],
   });
 
   // Inventory movements for snack sale (sale decreases stock)
   await prisma.inventoryMovement.createMany({
     data: [
-      { siteId: site.id, itemId: invSnackSoda.id, shiftId: shiftOpen.id, performedById: cashier2.id, type: InventoryMovementType.SALE, quantity: -2, unitCost: D(2500), occurredAt: saleB.createdAt, notes: `Venta snacks: Sale ${saleB.id}` },
-      { siteId: site.id, itemId: invSnackPop.id, shiftId: shiftOpen.id, performedById: cashier2.id, type: InventoryMovementType.SALE, quantity: -1, unitCost: D(3000), occurredAt: saleB.createdAt, notes: `Venta snacks: Sale ${saleB.id}` },
+      { siteId: site.id, itemId: invSnackGranizado.id, shiftId: shiftOpen.id, performedById: cashier2.id, type: InventoryMovementType.SALE, quantity: -2, unitCost: D(2500), occurredAt: saleB.createdAt, notes: `Venta snacks: Sale ${saleB.id}` },
+      { siteId: site.id, itemId: invSnackCrispetas.id, shiftId: shiftOpen.id, performedById: cashier2.id, type: InventoryMovementType.SALE, quantity: -1, unitCost: D(3000), occurredAt: saleB.createdAt, notes: `Venta snacks: Sale ${saleB.id}` },
     ],
   });
 
@@ -988,14 +1415,137 @@ async function main() {
     description: "Venta snacks + souvenir",
     occurredAt: saleB.createdAt,
     entries: [
-      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.DEBIT, amount: D(10000) },
-      { account: LedgerAccount.QR_PROVIDER, side: LedgerEntrySide.DEBIT, amount: D(22000) },
+      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.DEBIT, amount: D(30000) },
+      { account: LedgerAccount.QR_PROVIDER, side: LedgerEntrySide.DEBIT, amount: D(28000) },
 
-      // Revenue split: snacks vs other
-      { account: LedgerAccount.SNACKS_REVENUE, side: LedgerEntrySide.CREDIT, amount: productSoda.price.mul(2).add(productPopcorn.price) }, // 2 sodas + popcorn
-      { account: LedgerAccount.POS_REVENUE, side: LedgerEntrySide.CREDIT, amount: productSouvenir.price }, // souvenir a POS_REVENUE
+      // Revenue split: todo se registra como snacks en este catálogo
+      { account: LedgerAccount.SNACKS_REVENUE, side: LedgerEntrySide.CREDIT, amount: productGranizado12.price.mul(2).add(productCrispetas.price).add(productKitPintarte.price) },
     ],
   });
+
+  // Actividad comercial adicional distribuida en varios dias para poblar analytics
+  const historicalSalesSeed = [
+    {
+      daysAgo: 6,
+      customerId: customerAna.id,
+      createdAt: daysAgoAt(6, 11, 20),
+      lines: [
+        { productId: productGranizado12.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productGranizado12.price },
+        { productId: productCrispetas.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productCrispetas.price },
+      ],
+      payments: [{ method: PaymentMethod.CASH, amount: productGranizado12.price.add(productCrispetas.price) }],
+      revenueAccount: LedgerAccount.SNACKS_REVENUE,
+      description: "Venta historica snacks dia 6",
+    },
+    {
+      daysAgo: 5,
+      customerId: customerLuis.id,
+      createdAt: daysAgoAt(5, 16, 45),
+      lines: [
+        { productId: productKitPintarte.id, category: SaleCategory.SNACKS, qty: 2, unitPrice: productKitPintarte.price },
+      ],
+      payments: [{ method: PaymentMethod.QR, amount: productKitPintarte.price.mul(2), reference: "QR-HIST-501" }],
+      revenueAccount: LedgerAccount.SNACKS_REVENUE,
+      description: "Venta historica souvenirs dia 5",
+    },
+    {
+      daysAgo: 4,
+      customerId: consumerFinal.id,
+      createdAt: daysAgoAt(4, 14, 10),
+      lines: [
+        { productId: productCardPlastic.id, category: SaleCategory.CARD_PLASTIC, qty: 1, unitPrice: productCardPlastic.price },
+      ],
+      payments: [{ method: PaymentMethod.CASH, amount: productCardPlastic.price }],
+      revenueAccount: LedgerAccount.CARD_PLASTIC_REVENUE,
+      description: "Venta historica plastico dia 4",
+    },
+    {
+      daysAgo: 3,
+      customerId: customerAna.id,
+      createdAt: daysAgoAt(3, 17, 5),
+      lines: [
+        { productId: productGranizado12.id, category: SaleCategory.SNACKS, qty: 2, unitPrice: productGranizado12.price },
+        { productId: productKitPintarte.id, category: SaleCategory.SNACKS, qty: 1, unitPrice: productKitPintarte.price },
+      ],
+      payments: [
+        { method: PaymentMethod.CASH, amount: D(20000) },
+        { method: PaymentMethod.NEQUI, amount: productGranizado12.price.mul(2).add(productKitPintarte.price).sub(D(20000)), reference: "NEQUI-HIST-317" },
+      ],
+      revenueAccount: LedgerAccount.SNACKS_REVENUE,
+      description: "Venta historica mix dia 3",
+    },
+    {
+      daysAgo: 2,
+      customerId: customerLuis.id,
+      createdAt: daysAgoAt(2, 12, 30),
+      lines: [
+        { productId: productGranizado12.id, category: SaleCategory.SNACKS, qty: 3, unitPrice: productGranizado12.price },
+      ],
+      payments: [{ method: PaymentMethod.TRANSFER_ACCOUNT_1, amount: productGranizado12.price.mul(3), reference: "TRX-HIST-212" }],
+      revenueAccount: LedgerAccount.SNACKS_REVENUE,
+      description: "Venta historica snacks dia 2",
+    },
+    {
+      daysAgo: 1,
+      customerId: consumerFinal.id,
+      createdAt: daysAgoAt(1, 18, 50),
+      lines: [
+        { productId: productCrispetas.id, category: SaleCategory.SNACKS, qty: 2, unitPrice: productCrispetas.price },
+        { productId: productCardPlastic.id, category: SaleCategory.CARD_PLASTIC, qty: 1, unitPrice: productCardPlastic.price },
+      ],
+      payments: [{ method: PaymentMethod.CASH, amount: productCrispetas.price.mul(2).add(productCardPlastic.price) }],
+      revenueAccount: null,
+      description: "Venta historica snacks y plastico dia 1",
+    },
+  ];
+
+  for (const seedSale of historicalSalesSeed) {
+    const ctx = seedContextForDay(seedSale.daysAgo);
+    const sale = await createSale({
+      siteId: site.id,
+      customerId: seedSale.customerId,
+      shiftId: ctx.shiftId,
+      terminalId: ctx.terminalId,
+      cashSessionId: ctx.cashSessionId,
+      createdById: ctx.createdById,
+      status: SaleStatus.PAID,
+      createdAt: seedSale.createdAt,
+      lines: seedSale.lines,
+      payments: seedSale.payments,
+    });
+
+    const ledgerEntries: Entry[] = seedSale.payments.map((payment) => ({
+      account: paymentToLedgerAccount(payment.method),
+      side: LedgerEntrySide.DEBIT,
+      amount: payment.amount,
+    }));
+
+    if (seedSale.revenueAccount) {
+      ledgerEntries.push({
+        account: seedSale.revenueAccount,
+        side: LedgerEntrySide.CREDIT,
+        amount: sale.total,
+      });
+    } else {
+      const plasticTotal = productCardPlastic.price;
+      const snackTotal = sale.total.sub(plasticTotal);
+      ledgerEntries.push(
+        { account: LedgerAccount.CARD_PLASTIC_REVENUE, side: LedgerEntrySide.CREDIT, amount: plasticTotal },
+        { account: LedgerAccount.SNACKS_REVENUE, side: LedgerEntrySide.CREDIT, amount: snackTotal },
+      );
+    }
+
+    await createLedgerEvent({
+      siteId: site.id,
+      createdById: ctx.createdById,
+      shiftId: ctx.shiftId,
+      saleId: sale.id,
+      eventType: LedgerEventType.SALE,
+      description: seedSale.description,
+      occurredAt: sale.createdAt,
+      entries: ledgerEntries,
+    });
+  }
 
   // C) Venta de gift card (plástico) que se anula con aprobación
   const saleC = await createSale({
@@ -1007,8 +1557,8 @@ async function main() {
     createdById: cashier1.id,
     status: SaleStatus.PAID,
     createdAt: new Date(nowMinusDays(1).getTime() + 60 * 60 * 1000),
-    lines: [{ productId: productGiftPlastic.id, category: SaleCategory.GIFT_CARD, qty: 1, unitPrice: productGiftPlastic.price }],
-    payments: [{ method: PaymentMethod.CASH, amount: D(5000) }],
+    lines: [{ productId: productCardPlastic.id, category: SaleCategory.CARD_PLASTIC, qty: 1, unitPrice: productCardPlastic.price }],
+    payments: [{ method: PaymentMethod.CASH, amount: productCardPlastic.price }],
   });
 
   const leSaleC = await createLedgerEvent({
@@ -1020,8 +1570,8 @@ async function main() {
     description: "Venta gift card (plástico)",
     occurredAt: saleC.createdAt,
     entries: [
-      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.DEBIT, amount: D(5000) },
-      { account: LedgerAccount.POS_REVENUE, side: LedgerEntrySide.CREDIT, amount: D(5000) },
+      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.DEBIT, amount: productCardPlastic.price },
+      { account: LedgerAccount.CARD_PLASTIC_REVENUE, side: LedgerEntrySide.CREDIT, amount: productCardPlastic.price },
     ],
   });
 
@@ -1074,8 +1624,8 @@ async function main() {
     approvalId: approvalVoid.id,
     reversalOfId: leSaleC.id,
     entries: [
-      { account: LedgerAccount.POS_REVENUE, side: LedgerEntrySide.DEBIT, amount: D(5000) },
-      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.CREDIT, amount: D(5000) },
+      { account: LedgerAccount.CARD_PLASTIC_REVENUE, side: LedgerEntrySide.DEBIT, amount: productCardPlastic.price },
+      { account: LedgerAccount.CASH_ON_HAND, side: LedgerEntrySide.CREDIT, amount: productCardPlastic.price },
     ],
   });
 
@@ -1304,6 +1854,65 @@ async function main() {
     await prisma.cardBalanceEvent.update({
       where: { id: cbeUseReversal.id },
       data: { reversalOfId: lastUseCBE.id },
+    });
+  }
+
+  const historicalUsageSeed = [
+    { daysAgo: 6, hour: 13, minute: 5, attractionCode: "ARCADE-01", cardId: cards[0].id },
+    { daysAgo: 6, hour: 17, minute: 20, attractionCode: "VR-01", cardId: cards[4].id },
+    { daysAgo: 5, hour: 15, minute: 40, attractionCode: "PLAY-2-6", cardId: cards[5].id },
+    { daysAgo: 4, hour: 11, minute: 15, attractionCode: "ARCADE-04", cardId: cards[0].id },
+    { daysAgo: 4, hour: 18, minute: 25, attractionCode: "VR-02", cardId: cards[4].id },
+    { daysAgo: 3, hour: 16, minute: 10, attractionCode: "POLIROBO", cardId: cards[5].id },
+    { daysAgo: 2, hour: 14, minute: 50, attractionCode: "ARCADE-03", cardId: cards[0].id },
+    { daysAgo: 2, hour: 19, minute: 0, attractionCode: "PLAY-6-12", cardId: cards[4].id },
+    { daysAgo: 1, hour: 12, minute: 35, attractionCode: "ARCADE-05", cardId: cards[5].id },
+    { daysAgo: 1, hour: 17, minute: 45, attractionCode: "EXTRA-03", cardId: cards[0].id },
+  ];
+
+  for (const usageSeed of historicalUsageSeed) {
+    const attraction = attractions[usageSeed.attractionCode];
+    const ctx = seedContextForDay(usageSeed.daysAgo);
+    const occurredAt = daysAgoAt(usageSeed.daysAgo, usageSeed.hour, usageSeed.minute);
+
+    const ledger = await createLedgerEvent({
+      siteId: site.id,
+      createdById: ctx.createdById,
+      shiftId: ctx.shiftId,
+      eventType: LedgerEventType.ATTRACTION_USAGE,
+      description: `Uso histórico ${usageSeed.attractionCode}`,
+      occurredAt,
+      entries: [
+        { account: LedgerAccount.CARD_FLOAT_LIABILITY, side: LedgerEntrySide.DEBIT, amount: attraction.cost },
+        { account: LedgerAccount.POS_REVENUE, side: LedgerEntrySide.CREDIT, amount: attraction.cost },
+      ],
+    });
+
+    await prisma.attractionUsage.create({
+      data: {
+        siteId: site.id,
+        cardId: usageSeed.cardId,
+        attractionId: attraction.id,
+        readerId: attraction.readerIds[0],
+        playerIndex: 1,
+        type: AttractionUsageType.USE,
+        cost: attraction.cost,
+        occurredAt,
+        ledgerEventId: ledger.id,
+        performedById: null,
+      },
+    });
+
+    await prisma.cardBalanceEvent.create({
+      data: {
+        cardId: usageSeed.cardId,
+        siteId: site.id,
+        ledgerEventId: ledger.id,
+        occurredAt,
+        moneyDelta: attraction.cost.mul(-1),
+        pointsDelta: 0,
+        reason: `Uso histórico ${usageSeed.attractionCode}`,
+      },
     });
   }
 

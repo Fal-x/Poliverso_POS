@@ -1,0 +1,553 @@
+erDiagram
+  %% =========================
+  %% CORE / TENANCY / ACCESS
+  %% =========================
+  Organization {
+    string id PK
+    string name
+    string legalName
+    string nit
+  }
+  Site {
+    string id PK
+    string organizationId FK
+    string code
+    string name
+    string status
+    string timezone
+  }
+  SiteConfig {
+    string id PK
+    string siteId FK
+    decimal minRechargeAmount
+    int pointsPerCurrency
+    int currencyUnit
+  }
+  Role {
+    string id PK
+    string name
+  }
+  RolePermission {
+    string id PK
+    string roleId FK
+    string permission
+  }
+  User {
+    string id PK
+    string email
+    string fullName
+    string status
+  }
+  UserAssignment {
+    string id PK
+    string userId FK
+    string siteId FK
+    string roleId FK
+    bool isActive
+  }
+  UserAuthCode {
+    string id PK
+    string userId FK
+    datetime expiresAt
+  }
+  RefreshToken {
+    string id PK
+    string userId FK
+    datetime expiresAt
+    datetime revokedAt
+  }
+
+  Organization ||--o{ Site : has
+  Site ||--|| SiteConfig : config
+  Site o|--|| Customer : defaultCustomer
+  User ||--o{ UserAssignment : assigned
+  Site ||--o{ UserAssignment : has
+  Role ||--o{ UserAssignment : grants
+  Role ||--o{ RolePermission : contains
+  User ||--o| UserAuthCode : authCode
+  User ||--o{ RefreshToken : refreshTokens
+
+  %% =========================
+  %% TERMINALS / CASH / SHIFT
+  %% =========================
+  Terminal {
+    string id PK
+    string siteId FK
+    string code
+    string name
+  }
+  CashRegister {
+    string id PK
+    string siteId FK
+    string code
+    string name
+  }
+  Shift {
+    string id PK
+    string siteId FK
+    string terminalId FK
+    string cashRegisterId FK
+    string openedById FK
+    string closedById FK
+    string status
+  }
+  CashSession {
+    string id PK
+    string siteId FK
+    string terminalId FK
+    string cashRegisterId FK
+    string shiftId FK
+    string openedByUserId FK
+    string closedById FK
+    string status
+  }
+  CashCount {
+    string id PK
+    string cashSessionId FK
+    string siteId FK
+    string countedByUserId FK
+    string type
+  }
+  CashMovement {
+    string id PK
+    string cashSessionId FK
+    string siteId FK
+    string createdByUserId FK
+    string authorizedByUserId FK
+    string approvalId FK
+    string type
+    decimal amount
+  }
+
+  Site ||--o{ Terminal : has
+  Site ||--o{ CashRegister : has
+  Site ||--o{ Shift : has
+  Terminal ||--o{ Shift : operates
+  CashRegister ||--o{ Shift : uses
+  User ||--o{ Shift : opens_closes
+  Site ||--o{ CashSession : has
+  Terminal ||--o{ CashSession : opens
+  CashRegister ||--o{ CashSession : opens
+  Shift o|--o{ CashSession : linked
+  User ||--o{ CashSession : opens_closes
+  CashSession ||--o{ CashCount : records
+  CashSession ||--o{ CashMovement : movements
+  User ||--o{ CashCount : counts
+  User ||--o{ CashMovement : creates_authorizes_voids
+
+  %% =========================
+  %% CATALOG / SELLABLES
+  %% =========================
+  Categoria {
+    string id PK
+    string siteId FK
+    string codigo
+    string nombre
+  }
+  Subcategoria {
+    string id PK
+    string siteId FK
+    string categoriaId FK
+    string codigo
+    string nombre
+  }
+  ItemVendible {
+    string id PK
+    string siteId FK
+    string categoriaId FK
+    string subcategoriaId FK
+    string codigo
+    string nombre
+    string tipoOperacion
+    decimal precioBase
+  }
+  CodigoReservado {
+    string id PK
+    string siteId FK
+    string codigo
+    string categoria
+    string subcategoria
+  }
+  Product {
+    string id PK
+    string siteId FK
+    string sku
+    string name
+    decimal price
+    string category
+  }
+  InventoryItem {
+    string id PK
+    string siteId FK
+    string sku
+    string name
+    string category
+    int pointsCost
+  }
+  InventoryMovement {
+    string id PK
+    string siteId FK
+    string itemId FK
+    string performedById FK
+    string shiftId FK
+    string approvalId FK
+    string type
+    int quantity
+  }
+  PrizeRedemption {
+    string id PK
+    string siteId FK
+    string cardId FK
+    string itemId FK
+    string performedById FK
+    string ledgerEventId FK
+    int quantity
+    int pointsTotal
+  }
+
+  Site ||--o{ Categoria : has
+  Categoria ||--o{ Subcategoria : groups
+  Site ||--o{ Subcategoria : has
+  Categoria ||--o{ ItemVendible : contains
+  Subcategoria ||--o{ ItemVendible : contains
+  Site ||--o{ ItemVendible : has
+  Site ||--o{ CodigoReservado : reserves
+  Site ||--o{ Product : sells
+  Site ||--o{ InventoryItem : stocks
+  InventoryItem ||--o{ InventoryMovement : moved_by
+  Site ||--o{ InventoryMovement : has
+  User ||--o{ InventoryMovement : performed
+  Shift o|--o{ InventoryMovement : in_shift
+  InventoryItem ||--o{ PrizeRedemption : redeemed_as
+
+  %% =========================
+  %% CARDS / SALES / BONUSES
+  %% =========================
+  Card {
+    string id PK
+    string siteId FK
+    string uid
+    string status
+  }
+  CardStatusHistory {
+    string id PK
+    string siteId FK
+    string cardId FK
+    string changedByUserId FK
+    string fromStatus
+    string toStatus
+  }
+  CardBalanceEvent {
+    string id PK
+    string siteId FK
+    string cardId FK
+    string ledgerEventId FK
+    decimal moneyDelta
+    int pointsDelta
+    string reason
+  }
+  Sale {
+    string id PK
+    string siteId FK
+    string shiftId FK
+    string terminalId FK
+    string cashSessionId FK
+    string customerId FK
+    string createdById FK
+    string approvedById FK
+    string status
+    decimal total
+  }
+  SaleLine {
+    string id PK
+    string saleId FK
+    string productId FK
+    string cardId FK
+    string category
+    int quantity
+    decimal lineTotal
+  }
+  SalePayment {
+    string id PK
+    string saleId FK
+    string method
+    string type
+    decimal amount
+  }
+  BonusScale {
+    string id PK
+    string siteId FK
+    decimal minAmount
+    decimal bonusAmount
+  }
+  BonusApplied {
+    string id PK
+    string cardId FK
+    string saleId FK
+    string bonusScaleId FK
+    decimal bonusAmount
+  }
+
+  Site ||--o{ Card : has
+  Card ||--o{ CardStatusHistory : transitions
+  User ||--o{ CardStatusHistory : changes
+  Card ||--o{ CardBalanceEvent : wallet_events
+  Site ||--o{ CardBalanceEvent : has
+  Site ||--o{ Sale : has
+  Shift ||--o{ Sale : contains
+  Terminal ||--o{ Sale : created_in
+  CashSession ||--o{ Sale : paid_in
+  Customer ||--o{ Sale : buys
+  User ||--o{ Sale : creates_approves
+  Sale ||--o{ SaleLine : lines
+  Product o|--o{ SaleLine : product_line
+  Card o|--o{ SaleLine : recharge_line
+  Sale ||--o{ SalePayment : payments
+  Site ||--o{ BonusScale : defines
+  BonusScale ||--o{ BonusApplied : applies
+  Card ||--o{ BonusApplied : receives
+  Sale ||--o{ BonusApplied : earned_in
+
+  %% =========================
+  %% ATTRACTIONS / READERS
+  %% =========================
+  Attraction {
+    string id PK
+    string siteId FK
+    string readerId FK
+    string code
+    string name
+    string type
+    decimal price
+    int duration
+    string status
+    string location
+  }
+  Reader {
+    string id PK
+    string siteId FK
+    string attractionId FK
+    string code
+    int position
+  }
+  DeviceLog {
+    string id PK
+    string siteId FK
+    string readerId FK
+    string requestId
+    string eventType
+  }
+  AttractionUsage {
+    bigint id PK
+    string siteId FK
+    string cardId FK
+    string attractionId FK
+    string readerId FK
+    string ledgerEventId FK
+    string approvalId FK
+    string type
+    decimal cost
+  }
+
+  Site ||--o{ Attraction : has
+  Attraction o|--|| Reader : primary
+  Attraction ||--o{ Reader : has
+  Reader ||--o{ DeviceLog : logs
+  Site ||--o{ DeviceLog : has
+  Site ||--o{ AttractionUsage : has
+  Card ||--o{ AttractionUsage : consumes
+  Attraction ||--o{ AttractionUsage : used
+  Reader ||--o{ AttractionUsage : reads
+  User o|--o{ AttractionUsage : performedBy
+
+  %% =========================
+  %% SERVICES / PROGRAMS / EVENTS
+  %% =========================
+  Customer {
+    string id PK
+    string siteId FK
+    string documentType
+    string documentNumber
+    string fullName
+  }
+  Service {
+    string id PK
+    string siteId FK
+    string name
+    decimal price
+  }
+  ServiceSale {
+    string id PK
+    string siteId FK
+    string serviceId FK
+    string customerId FK
+    string status
+    decimal totalAmount
+    decimal paidAmount
+  }
+  ServicePayment {
+    string id PK
+    string serviceSaleId FK
+    decimal amount
+    string method
+  }
+  PolikidStudent {
+    string id PK
+    string siteId FK
+    string firstName
+    string lastName
+    string status
+  }
+  ProgramEnrollment {
+    string id PK
+    string siteId FK
+    string studentId FK
+    string programName
+    string groupName
+    decimal finalAmount
+    string status
+  }
+  EnrollmentPayment {
+    string id PK
+    string siteId FK
+    string enrollmentId FK
+    string createdById FK
+    decimal amount
+    string method
+  }
+  EventBasePlan {
+    string id PK
+    string siteId FK
+    string name
+    decimal defaultValue
+    bool isActive
+  }
+  EventBooking {
+    string id PK
+    string siteId FK
+    string customerId FK
+    string basePlanId FK
+    string bookingType
+    date eventDate
+    decimal totalValue
+    string status
+  }
+  EventBookingPayment {
+    string id PK
+    string siteId FK
+    string bookingId FK
+    string createdById FK
+    decimal amount
+    string method
+  }
+  Promotion {
+    string id PK
+    string siteId FK
+    string code
+    string scope
+    string type
+    bool isActive
+  }
+
+  Site ||--o{ Customer : has
+  Site ||--o{ Service : has
+  Service ||--o{ ServiceSale : sold
+  Customer ||--o{ ServiceSale : contracts
+  Site ||--o{ ServiceSale : has
+  ServiceSale ||--o{ ServicePayment : payments
+  Site ||--o{ PolikidStudent : has
+  PolikidStudent ||--o{ ProgramEnrollment : enrollments
+  Site ||--o{ ProgramEnrollment : has
+  ProgramEnrollment ||--o{ EnrollmentPayment : payments
+  User ||--o{ EnrollmentPayment : created
+  Site ||--o{ EventBasePlan : has
+  EventBasePlan ||--o{ EventBooking : template
+  Customer ||--o{ EventBooking : books
+  Site ||--o{ EventBooking : has
+  EventBooking ||--o{ EventBookingPayment : payments
+  User ||--o{ EventBookingPayment : created
+  Site ||--o{ Promotion : has
+
+  %% =========================
+  %% LEDGER / APPROVAL / AUDIT
+  %% =========================
+  LedgerEvent {
+    string id PK
+    string siteId FK
+    string shiftId FK
+    string saleId FK
+    string serviceSaleId FK
+    string createdById FK
+    string approvalId FK
+    string eventType
+  }
+  LedgerEntry {
+    string id PK
+    string eventId FK
+    string account
+    string side
+    decimal amount
+  }
+  PointsLedgerEvent {
+    string id PK
+    string siteId FK
+    string cardId FK
+    string saleId FK
+    string ledgerEventId FK
+    string createdById FK
+    int pointsDelta
+    string reason
+  }
+  SupervisorApproval {
+    string id PK
+    string siteId FK
+    string requestedById FK
+    string approvedById FK
+    string action
+    string entityType
+    string entityId
+    string reason
+  }
+  AdminAction {
+    string id PK
+    string siteId FK
+    string actorId FK
+    string approvalId FK
+    string actionType
+    string entityType
+    string entityId
+  }
+  AuditLog {
+    string id PK
+    string siteId FK
+    string actorId FK
+    string action
+    string entityType
+    string entityId
+  }
+
+  Site ||--o{ LedgerEvent : has
+  Shift o|--o{ LedgerEvent : scoped
+  Sale o|--o{ LedgerEvent : links
+  ServiceSale o|--o{ LedgerEvent : links
+  User ||--o{ LedgerEvent : creates
+  LedgerEvent ||--o{ LedgerEntry : entries
+  Card o|--o{ PointsLedgerEvent : points_history
+  Sale o|--o{ PointsLedgerEvent : source_sale
+  LedgerEvent o|--o{ PointsLedgerEvent : linked
+  User ||--o{ PointsLedgerEvent : creates
+  LedgerEvent o|--o{ CardBalanceEvent : linked
+  LedgerEvent o|--o{ AttractionUsage : linked
+  LedgerEvent o|--o{ PrizeRedemption : linked
+  Site ||--o{ SupervisorApproval : approvals
+  User ||--o{ SupervisorApproval : requested_approved
+  SupervisorApproval o|--o{ CashMovement : authorizes
+  SupervisorApproval o|--o{ CashSession : authorizes
+  SupervisorApproval o|--o{ InventoryMovement : authorizes
+  SupervisorApproval o|--o{ AttractionUsage : authorizes
+  SupervisorApproval o|--o{ LedgerEvent : authorizes
+  SupervisorApproval o|--o{ AdminAction : authorizes
+  Site ||--o{ AdminAction : has
+  User ||--o{ AdminAction : performs
+  Site ||--o{ AuditLog : has
+  User ||--o{ AuditLog : writes

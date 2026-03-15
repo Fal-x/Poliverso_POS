@@ -1,4 +1,5 @@
 import { Delete, CornerDownLeft } from 'lucide-react';
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 interface NumPadProps {
@@ -8,6 +9,8 @@ interface NumPadProps {
   maxLength?: number;
   showDecimal?: boolean;
   className?: string;
+  buttonClassName?: string;
+  enableKeyboard?: boolean;
 }
 
 export function NumPad({ 
@@ -16,7 +19,9 @@ export function NumPad({
   onSubmit,
   maxLength = 10,
   showDecimal = false,
-  className 
+  className,
+  buttonClassName,
+  enableKeyboard = true
 }: NumPadProps) {
   const handlePress = (digit: string) => {
     if (value.length < maxLength) {
@@ -31,6 +36,37 @@ export function NumPad({
   const handleClear = () => {
     onChange('');
   };
+
+  useEffect(() => {
+    if (!enableKeyboard) return;
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (event.key >= '0' && event.key <= '9') {
+        handlePress(event.key);
+        return;
+      }
+      if (showDecimal && event.key === '.') {
+        handlePress('.');
+        return;
+      }
+      if (event.key === 'Backspace') {
+        handleDelete();
+        return;
+      }
+      if (event.key === 'Escape') {
+        handleClear();
+        return;
+      }
+      if (event.key === 'Enter' && onSubmit) {
+        onSubmit();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [enableKeyboard, showDecimal, onSubmit, value]);
 
   const buttons = [
     ['1', '2', '3'],
@@ -47,7 +83,7 @@ export function NumPad({
             <button
               key={idx}
               onClick={handleDelete}
-              className="numpad-btn bg-warning/20 text-warning hover:bg-warning/30"
+              className={cn('numpad-btn bg-warning/20 text-warning hover:bg-warning/30', buttonClassName)}
             >
               <Delete className="h-6 w-6" />
             </button>
@@ -58,7 +94,7 @@ export function NumPad({
             <button
               key={idx}
               onClick={handleClear}
-              className="numpad-btn bg-destructive/20 text-destructive hover:bg-destructive/30"
+              className={cn('numpad-btn bg-destructive/20 text-destructive hover:bg-destructive/30', buttonClassName)}
             >
               C
             </button>
@@ -68,7 +104,7 @@ export function NumPad({
           <button
             key={idx}
             onClick={() => handlePress(btn)}
-            className="numpad-btn"
+            className={cn('numpad-btn', buttonClassName)}
           >
             {btn}
           </button>
@@ -117,6 +153,28 @@ export function PinPad({
   const handleDelete = () => {
     onChange(value.slice(0, -1));
   };
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (event.key >= '0' && event.key <= '9') {
+        handlePress(event.key);
+        return;
+      }
+      if (event.key === 'Backspace') {
+        handleDelete();
+        return;
+      }
+      if (event.key === 'Enter' && value.length === maxLength) {
+        onSubmit(value);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [value, maxLength]);
 
   return (
     <div className="space-y-6">

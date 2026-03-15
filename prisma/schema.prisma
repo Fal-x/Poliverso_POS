@@ -57,6 +57,8 @@ enum CardStatus {
   ACTIVE
   LOST
   BLOCKED
+  REPLACED
+  INACTIVE
 }
 
 enum ShiftStatus {
@@ -84,8 +86,13 @@ enum CashMovementType {
 enum PaymentMethod {
   CASH
   TRANSFER
+  TRANSFER_ACCOUNT_1
+  TRANSFER_ACCOUNT_2
+  NEQUI
   QR
   CARD
+  CREDIT_CARD
+  CREDIT
   MIXED
 }
 
@@ -168,11 +175,46 @@ enum AttractionUsageType {
   REVERSAL
 }
 
+enum AttractionMachineType {
+  TIME
+  SKILL
+}
+
+enum AttractionStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
 enum ServiceStatus {
   OPEN
   PARTIAL
   CLOSED
   CANCELLED
+}
+
+enum EventBookingType {
+  PREDEFINED_PLAN
+  CUSTOM_EVENT
+}
+
+enum PromotionType {
+  PERCENT_DISCOUNT
+  COMBO
+  BONUS
+  RECHARGE_ADDITIONAL
+}
+
+enum PromotionScope {
+  SALE
+  RECHARGE
+}
+
+enum PolikidStudentStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  WITHDRAWN
 }
 
 enum AuditAction {
@@ -229,6 +271,14 @@ enum AdminActionType {
   OTHER
 }
 
+enum TipoOperacionVendible {
+  PRODUCTO
+  SERVICIO
+  USO
+  PROGRAMA
+  EVENTO
+}
+
 // ============================
 // Core tenancy + access
 // ============================
@@ -274,6 +324,10 @@ model Site {
   cards          Card[]
   bonusScales    BonusScale[]
   products       Product[]
+  categorias     Categoria[]
+  subcategorias  Subcategoria[]
+  itemsVendibles ItemVendible[]
+  codigosReservados CodigoReservado[]
   services       Service[]
   attractions    Attraction[]
   readers        Reader[]
@@ -285,12 +339,23 @@ model Site {
   usages         AttractionUsage[]
   inventoryMovements InventoryMovement[]
   cardBalanceEvents  CardBalanceEvent[]
+  pointsLedgerEvents PointsLedgerEvent[]
+  cardStatusHistory  CardStatusHistory[]
   serviceSales       ServiceSale[]
+  polikidStudents    PolikidStudent[]
+  programEnrollments ProgramEnrollment[]
+  enrollmentPayments EnrollmentPayment[]
+  eventBasePlans     EventBasePlan[]
+  eventBookings      EventBooking[]
+  eventBookingPayments EventBookingPayment[]
+  promotions        Promotion[]
+  prizeRedemptions  PrizeRedemption[]
   approvals          SupervisorApproval[]
   adminActions       AdminAction[]
   cashSessions       CashSession[]
   cashCounts         CashCount[]
   cashMovements      CashMovement[]
+  deviceLogs         DeviceLog[]
   configs        SiteConfig?
 
   @@index([organizationId])
@@ -304,6 +369,8 @@ model SiteConfig {
   minRechargeAmount  Decimal  @db.Decimal(18, 2)
   pointsPerCurrency  Int      @default(1)
   currencyUnit       Int      @default(1000)
+  dailySalesGoal     Decimal  @default(0) @db.Decimal(18, 2)
+  creditTermDays     Int      @default(15)
   createdAt          DateTime @default(now()) @db.Timestamptz(6)
   updatedAt          DateTime @updatedAt @db.Timestamptz(6)
 
@@ -354,12 +421,18 @@ model User {
   shiftsOpened     Shift[]            @relation("ShiftOpenedBy")
   shiftsClosed     Shift[]            @relation("ShiftClosedBy")
   inventoryMovements InventoryMovement[] @relation("InventoryPerformedBy")
+  cardStatusChanges  CardStatusHistory[] @relation("CardStatusChangedBy")
+  pointsEvents       PointsLedgerEvent[] @relation("PointsLedgerCreatedBy")
+  enrollmentPayments EnrollmentPayment[] @relation("EnrollmentPaymentCreatedBy")
+  eventBookingPayments EventBookingPayment[] @relation("EventBookingPaymentCreatedBy")
+  prizeRedemptions  PrizeRedemption[] @relation("PrizeRedemptionPerformedBy")
   authCode        UserAuthCode?
   cashSessionsOpened CashSession[] @relation("CashSessionOpenedBy")
   cashSessionsClosed CashSession[] @relation("CashSessionClosedBy")
   cashCounts         CashCount[]   @relation("CashCountedBy")
   cashMovementsCreated CashMovement[] @relation("CashMovementCreatedBy")
   cashMovementsAuthorized CashMovement[] @relation("CashMovementAuthorizedBy")
+  cashMovementsVoided  CashMovement[] @relation("CashMovementVoidedBy")
   refreshTokens   RefreshToken[]
 }
 
@@ -548,20 +621,107 @@ model CashMovement {
   authorizedByUserId String
   createdAt        DateTime         @default(now()) @db.Timestamptz(6)
   approvalId       String?
+  voidedAt         DateTime?        @db.Timestamptz(6)
+  voidedByUserId   String?
+  voidedApprovalId String?
+  voidReason       String?
 
   cashSession CashSession @relation(fields: [cashSessionId], references: [id])
   site        Site        @relation(fields: [siteId], references: [id])
   createdBy   User        @relation("CashMovementCreatedBy", fields: [createdByUserId], references: [id])
   authorizedBy User       @relation("CashMovementAuthorizedBy", fields: [authorizedByUserId], references: [id])
   approval    SupervisorApproval? @relation(fields: [approvalId], references: [id])
+  voidedBy    User?       @relation("CashMovementVoidedBy", fields: [voidedByUserId], references: [id])
+  voidedApproval SupervisorApproval? @relation("CashMovementVoidedApproval", fields: [voidedApprovalId], references: [id])
 
   @@index([cashSessionId, createdAt])
   @@index([type, createdAt])
+  @@index([voidedAt])
 }
 
 // ============================
 // Products, inventory, cards
 // ============================
+
+/// Categoría base para todo lo vendible en POS.
+model Categoria {
+  id        String   @id @default(uuid())
+  siteId    String
+  codigo    String?
+  nombre    String
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  site          Site           @relation(fields: [siteId], references: [id])
+  subcategorias Subcategoria[]
+  items         ItemVendible[]
+
+  @@unique([siteId, nombre])
+  @@unique([siteId, codigo])
+  @@index([siteId, activo])
+}
+
+/// Subcategoría base para todo lo vendible en POS.
+model Subcategoria {
+  id          String   @id @default(uuid())
+  siteId      String
+  categoriaId String
+  codigo      String?
+  nombre      String
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  site      Site      @relation(fields: [siteId], references: [id])
+  categoria Categoria @relation(fields: [categoriaId], references: [id])
+  items     ItemVendible[]
+
+  @@unique([siteId, categoriaId, nombre])
+  @@unique([siteId, codigo])
+  @@index([siteId, categoriaId, activo])
+}
+
+/// Ítem vendible unificado: producto, servicio, uso, programa o evento.
+model ItemVendible {
+  id                  String                @id @default(uuid())
+  siteId              String
+  categoriaId         String
+  subcategoriaId      String
+  codigo              String
+  nombre              String
+  tipoOperacion       TipoOperacionVendible
+  tieneInventario     Boolean               @default(false)
+  usaSaldoElectronico Boolean               @default(false)
+  usaPuntos           Boolean               @default(false)
+  precioBase          Decimal               @db.Decimal(18, 2)
+  activo              Boolean               @default(true)
+  createdAt           DateTime              @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime              @updatedAt @db.Timestamptz(6)
+
+  site         Site        @relation(fields: [siteId], references: [id])
+  categoria    Categoria   @relation(fields: [categoriaId], references: [id])
+  subcategoria Subcategoria @relation(fields: [subcategoriaId], references: [id])
+
+  @@unique([siteId, codigo])
+  @@index([siteId, categoriaId, subcategoriaId, activo])
+}
+
+/// Histórico de códigos reservados para no reutilizar consecutivos.
+model CodigoReservado {
+  id          String   @id @default(uuid())
+  siteId      String
+  codigo      String
+  prefijo     String
+  consecutivo Int
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@unique([siteId, codigo])
+  @@unique([siteId, prefijo, consecutivo])
+  @@index([siteId, prefijo, consecutivo])
+}
 
 /// POS products sold at the counter (including recharge placeholders).
 model Product {
@@ -570,6 +730,8 @@ model Product {
   name      String
   sku       String?
   category  SaleCategory
+  analyticsCategory String?
+  analyticsSubcategory String?
   price     Decimal       @db.Decimal(18, 2)
   isActive  Boolean       @default(true)
   createdAt DateTime      @default(now()) @db.Timestamptz(6)
@@ -589,15 +751,42 @@ model InventoryItem {
   name      String
   sku       String?
   category  InventoryCategory
+  pointsCost Int              @default(0)
   isActive  Boolean           @default(true)
   createdAt DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt DateTime          @updatedAt @db.Timestamptz(6)
 
   site      Site               @relation(fields: [siteId], references: [id])
   movements InventoryMovement[]
+  redemptions PrizeRedemption[]
 
   @@index([siteId, category])
   @@unique([siteId, sku])
+}
+
+/// Prize redemption transaction (points wallet + inventory out + receipt).
+model PrizeRedemption {
+  id               String   @id @default(uuid())
+  siteId           String
+  cardId           String
+  itemId           String
+  quantity         Int
+  pointsUnitCost   Int
+  pointsTotal      Int
+  receiptNumber    String
+  receiptText      String?
+  performedById    String
+  ledgerEventId    String?
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+
+  site        Site         @relation(fields: [siteId], references: [id])
+  card        Card         @relation(fields: [cardId], references: [id])
+  item        InventoryItem @relation(fields: [itemId], references: [id])
+  performedBy User         @relation("PrizeRedemptionPerformedBy", fields: [performedById], references: [id])
+  ledgerEvent LedgerEvent? @relation(fields: [ledgerEventId], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([cardId, createdAt])
 }
 
 /// Append-only inventory movements for auditability.
@@ -629,16 +818,45 @@ model Card {
   id        String     @id @default(uuid())
   siteId    String
   uid       String     @unique
+  label     String?
+  creditBalance Decimal @default(0) @db.Decimal(18, 2)
+  pointsBalance Int     @default(0)
   status    CardStatus @default(ACTIVE)
+  ownerCustomerId String?
   issuedAt  DateTime   @default(now()) @db.Timestamptz(6)
 
   site          Site              @relation(fields: [siteId], references: [id])
+  ownerCustomer Customer?         @relation("CardOwner", fields: [ownerCustomerId], references: [id])
   balances      CardBalanceEvent[]
+  pointsEvents  PointsLedgerEvent[]
   rechargeLines SaleLine[]        @relation("RechargeLines")
   usages        AttractionUsage[]
   bonuses       BonusApplied[]
+  statusHistory CardStatusHistory[]
+  prizeRedemptions PrizeRedemption[]
 
   @@index([siteId, status])
+  @@index([siteId, ownerCustomerId])
+}
+
+/// Immutable status transition history for issued cards.
+model CardStatusHistory {
+  id              String     @id @default(uuid())
+  siteId          String
+  cardId          String
+  fromStatus      CardStatus?
+  toStatus        CardStatus
+  reason          String
+  changedByUserId String
+  metadata        Json?
+  occurredAt      DateTime   @default(now()) @db.Timestamptz(6)
+
+  site      Site @relation(fields: [siteId], references: [id])
+  card      Card @relation(fields: [cardId], references: [id])
+  changedBy User @relation("CardStatusChangedBy", fields: [changedByUserId], references: [id])
+
+  @@index([siteId, cardId, occurredAt])
+  @@index([changedByUserId, occurredAt])
 }
 
 /// Card balance events (money + points) are append-only and reversible.
@@ -705,6 +923,7 @@ model Sale {
   lines      SaleLine[]
   payments   SalePayment[]
   ledgerEvents LedgerEvent[]
+  pointsLedgerEvents PointsLedgerEvent[]
   bonuses    BonusApplied[]
 
   @@index([siteId, createdAt])
@@ -792,11 +1011,19 @@ model Attraction {
   siteId    String
   name      String
   code      String
-  cost      Decimal  @db.Decimal(18, 2)
-  isActive  Boolean  @default(true)
+  type      AttractionMachineType @default(SKILL) @map("machineType")
+  price     Decimal  @db.Decimal(18, 2) @map("cost")
+  duration  Int      @default(0)
+  status    AttractionStatus @default(ACTIVE)
+  readerId  String?  @unique
+  location  String?
+  maintenanceMessage String? @db.VarChar(240)
+  costPoints Int     @default(0)
+  pointsReward Int   @default(1000)
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   site   Site   @relation(fields: [siteId], references: [id])
+  reader  Reader? @relation("AttractionPrimaryReader", fields: [readerId], references: [id])
   readers Reader[]
   usages  AttractionUsage[]
 
@@ -812,14 +1039,48 @@ model Reader {
   code         String
   position     Int      @default(1)
   isActive     Boolean  @default(true)
+  apiTokenHash String?
+  hmacSecret   String?
+  lastSeenAt   DateTime? @db.Timestamptz(6)
   createdAt    DateTime @default(now()) @db.Timestamptz(6)
 
   site       Site       @relation(fields: [siteId], references: [id])
   attraction Attraction @relation(fields: [attractionId], references: [id])
+  primaryForAttractions Attraction[] @relation("AttractionPrimaryReader")
   usages     AttractionUsage[]
+  deviceLogs DeviceLog[]
 
   @@unique([attractionId, code])
   @@index([siteId])
+}
+
+/// Device logs for ESP readers and validations.
+model DeviceLog {
+  id            String   @id @default(uuid())
+  siteId        String
+  readerId      String
+  uid           String?
+  cardId        String?
+  activityId    String?
+  requestId     String
+  eventType     String
+  allowed       Boolean?
+  reason        String?
+  latency       Int?
+  pointsBefore  Int?
+  pointsAfter   Int?
+  creditBefore  Decimal? @db.Decimal(18, 2)
+  creditAfter   Decimal? @db.Decimal(18, 2)
+  payload       Json?
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  site   Site   @relation(fields: [siteId], references: [id])
+  reader Reader @relation(fields: [readerId], references: [id])
+
+  @@unique([readerId, requestId])
+  @@index([uid])
+  @@index([readerId])
+  @@index([siteId, createdAt])
 }
 
 /// High-volume usage events; reversals are separate events linked by reversalOfId.
@@ -876,6 +1137,8 @@ model Customer {
   serviceSales ServiceSale[]
   sales        Sale[]
   defaultForSites Site[]  @relation("DefaultCustomer")
+  eventBookings EventBooking[]
+  ownedCards    Card[]        @relation("CardOwner")
 
   @@unique([siteId, documentType, documentNumber])
   @@index([siteId])
@@ -934,6 +1197,167 @@ model ServicePayment {
   @@index([method])
 }
 
+/// Student master data for POLIKid programs.
+model PolikidStudent {
+  id             String              @id @default(uuid())
+  siteId         String
+  firstName      String
+  lastName       String
+  documentType   CustomerDocumentType
+  documentNumber String
+  birthDate      DateTime            @db.Date
+  phone          String?
+  email          String?
+  address        String?
+  guardianName   String?
+  guardianPhone  String?
+  status         PolikidStudentStatus @default(ACTIVE)
+  notes          String?
+  createdAt      DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(6)
+
+  site        Site                @relation(fields: [siteId], references: [id])
+  enrollments ProgramEnrollment[]
+
+  @@unique([siteId, documentType, documentNumber])
+  @@index([siteId, status])
+}
+
+/// Enrollment in a program/group. Monetary progress is derived from payments.
+model ProgramEnrollment {
+  id             String   @id @default(uuid())
+  siteId         String
+  studentId      String
+  programName    String
+  groupName      String?
+  startsAt       DateTime? @db.Date
+  endsAt         DateTime? @db.Date
+  dueDate        DateTime? @db.Date
+  totalAmount    Decimal  @db.Decimal(18, 2)
+  discountAmount Decimal  @db.Decimal(18, 2) @default(0)
+  finalAmount    Decimal  @db.Decimal(18, 2)
+  status         ServiceStatus @default(OPEN)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
+
+  site      Site          @relation(fields: [siteId], references: [id])
+  student   PolikidStudent @relation(fields: [studentId], references: [id])
+  payments  EnrollmentPayment[]
+
+  @@index([siteId, status, createdAt])
+  @@index([siteId, programName, groupName])
+}
+
+/// Partial payments for enrollments. Append-only.
+model EnrollmentPayment {
+  id           String   @id @default(uuid())
+  siteId       String
+  enrollmentId String
+  amount       Decimal  @db.Decimal(18, 2)
+  method       PaymentMethod
+  notes        String?
+  createdById  String
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  site       Site             @relation(fields: [siteId], references: [id])
+  enrollment ProgramEnrollment @relation(fields: [enrollmentId], references: [id])
+  createdBy  User             @relation("EnrollmentPaymentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([enrollmentId, createdAt])
+}
+
+/// Base plans for events/celebrations. Can be predefined or customizable templates.
+model EventBasePlan {
+  id          String   @id @default(uuid())
+  siteId      String
+  name        String
+  description String?
+  defaultValue Decimal @db.Decimal(18, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  site     Site          @relation(fields: [siteId], references: [id])
+  bookings EventBooking[]
+
+  @@unique([siteId, name])
+  @@index([siteId, isActive])
+}
+
+/// Event/celebration booking with append-only payments.
+model EventBooking {
+  id              String           @id @default(uuid())
+  siteId          String
+  customerId      String
+  basePlanId      String?
+  bookingType     EventBookingType
+  customPlanName  String?
+  eventDate       DateTime         @db.Date
+  status          ServiceStatus    @default(OPEN)
+  totalValue      Decimal          @db.Decimal(18, 2)
+  notes           String?
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(6)
+
+  site      Site             @relation(fields: [siteId], references: [id])
+  customer  Customer         @relation(fields: [customerId], references: [id])
+  basePlan  EventBasePlan?   @relation(fields: [basePlanId], references: [id])
+  payments  EventBookingPayment[]
+
+  @@index([siteId, eventDate, status])
+  @@index([siteId, bookingType, createdAt])
+  @@index([customerId, eventDate])
+}
+
+/// Partial payments for event bookings (append-only).
+model EventBookingPayment {
+  id         String        @id @default(uuid())
+  siteId     String
+  bookingId  String
+  amount     Decimal       @db.Decimal(18, 2)
+  method     PaymentMethod
+  notes      String?
+  createdById String
+  createdAt  DateTime      @default(now()) @db.Timestamptz(6)
+
+  site      Site         @relation(fields: [siteId], references: [id])
+  booking   EventBooking @relation(fields: [bookingId], references: [id])
+  createdBy User         @relation("EventBookingPaymentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([bookingId, createdAt])
+}
+
+/// Generic promotion rule engine definition. Applied at runtime only.
+model Promotion {
+  id                   String         @id @default(uuid())
+  siteId               String
+  code                 String
+  name                 String
+  description          String?
+  type                 PromotionType
+  scope                PromotionScope
+  isActive             Boolean        @default(true)
+  priority             Int            @default(100)
+  startsAt             DateTime?      @db.Timestamptz(6)
+  endsAt               DateTime?      @db.Timestamptz(6)
+  percentValue         Decimal?       @db.Decimal(8, 4)
+  fixedValue           Decimal?       @db.Decimal(18, 2)
+  exactValues          Json?
+  dayRestrictions      Json?
+  productRestrictions  Json?
+  exceptions           Json?
+  metadata             Json?
+  createdAt            DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@unique([siteId, code])
+  @@index([siteId, scope, isActive, priority])
+}
+
 // ============================
 // Ledger (append-only)
 // ============================
@@ -962,11 +1386,37 @@ model LedgerEvent {
   reversals   LedgerEvent[] @relation("LedgerEventReversal")
   entries     LedgerEntry[]
   cardBalanceEvents CardBalanceEvent[] @relation("CardBalanceLedger")
+  pointsLedgerEvents PointsLedgerEvent[] @relation("PointsLedgerLedger")
   attractionUsages  AttractionUsage[]  @relation("AttractionUsageLedger")
+  prizeRedemptions  PrizeRedemption[]
 
   @@index([siteId, occurredAt])
   @@index([eventType, occurredAt])
   @@index([saleId])
+}
+
+/// Append-only points ledger for card point accrual/usage traceability.
+model PointsLedgerEvent {
+  id            String   @id @default(uuid())
+  siteId        String
+  cardId        String
+  saleId        String?
+  ledgerEventId String?
+  pointsDelta   Int
+  reason        String
+  metadata      Json?
+  createdById   String
+  occurredAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  site        Site        @relation(fields: [siteId], references: [id])
+  card        Card        @relation(fields: [cardId], references: [id])
+  sale        Sale?       @relation(fields: [saleId], references: [id])
+  ledgerEvent LedgerEvent? @relation("PointsLedgerLedger", fields: [ledgerEventId], references: [id])
+  createdBy   User        @relation("PointsLedgerCreatedBy", fields: [createdById], references: [id])
+
+  @@index([siteId, cardId, occurredAt])
+  @@index([saleId])
+  @@index([ledgerEventId])
 }
 
 /// Double-entry lines per event to preserve accounting integrity.
@@ -1009,6 +1459,7 @@ model SupervisorApproval {
   cashSessionsOpened CashSession[] @relation("CashSessionOpenedApproval")
   cashSessionsClosed CashSession[] @relation("CashSessionClosedApproval")
   cashMovements      CashMovement[]
+  cashMovementsVoided CashMovement[] @relation("CashMovementVoidedApproval")
   adminActions       AdminAction[]
 }
 

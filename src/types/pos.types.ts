@@ -7,7 +7,15 @@ export type UserRole = 'cashier' | 'supervisor' | 'admin';
 export type CashRegisterStatus = 'closed' | 'open';
 
 // Medios de pago
-export type PaymentMethod = 'cash' | 'transfer' | 'qr' | 'debit' | 'credit';
+export type PaymentMethod =
+  | 'cash'
+  | 'transfer_account_1'
+  | 'transfer_account_2'
+  | 'nequi'
+  | 'qr'
+  | 'debit'
+  | 'credit_card'
+  | 'credit';
 
 // Estados de transacción
 export type TransactionStatus = 'completed' | 'pending' | 'cancelled' | 'refunded';
@@ -57,13 +65,24 @@ export interface Shift {
 export interface Card {
   id: string;
   code: string;
+  label?: string | null;
   balance: number;
   bonusBalance: number;
   points: number;
   isActive: boolean;
+  status?: string;
   createdAt: Date;
   lastUsedAt?: Date;
   customerId?: string;
+  owner?: {
+    id: string;
+    document_type: string;
+    document_number: string;
+    full_name: string;
+    phone: string;
+    email?: string | null;
+    city: string;
+  } | null;
 }
 
 // Cliente

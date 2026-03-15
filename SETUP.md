@@ -75,6 +75,13 @@ npm run prisma:studio
 5. Habilitar monitoreo (latencia, locks, crecimiento de tablas y WAL).
 6. Definir politicas de retencion para logs y eventos historicos.
 
+## 11) Scripts operativos recomendados (sin Docker)
+- Setup local: `./scripts/setup.sh`
+- Arranque local daemonizado: `./scripts/dev-daemon.sh start`
+- Instalacion Ubuntu base: `sudo ./scripts/install-ubuntu.sh`
+- Instalacion systemd: `sudo ./scripts/install-systemd.sh`
+- Arranque productivo manual: `./scripts/start-production.sh`
+
 ## 10) Nota de seguridad
 - Nunca ejecutar `DELETE` o `UPDATE` sobre `LedgerEvent`, `LedgerEntry` y `CardBalanceEvent`.
 - Toda accion sensible debe crear `SupervisorApproval` y `AuditLog`.

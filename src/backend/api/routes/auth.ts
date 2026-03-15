@@ -4,21 +4,24 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/backend/prisma';
 import { ok, fail } from '../utils/response';
+import { sanitizeDigits, sanitizeToken, sanitizeUuid } from '@/backend/utils/sanitize';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (req, reply) => {
     const body = req.body as { user_id: string; code: string };
-    if (!body?.user_id || !body?.code) {
+    const userId = sanitizeUuid(body?.user_id);
+    const code = sanitizeDigits(body?.code, 12);
+    if (!userId || !code) {
       return fail(reply, 'VALIDATION_ERROR', 'user_id y code son requeridos');
     }
 
-    const user = await prisma.user.findUnique({ where: { id: body.user_id } });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return fail(reply, 'NOT_FOUND', 'Usuario no encontrado', 404);
 
     const authCode = await prisma.userAuthCode.findUnique({ where: { userId: user.id } });
     if (!authCode) return fail(reply, 'AUTH_CODE_MISSING', 'Código no configurado', 401);
 
-    const valid = await bcrypt.compare(body.code, authCode.codeHash);
+    const valid = await bcrypt.compare(code, authCode.codeHash);
     if (!valid) {
       await prisma.userAuthCode.update({
         where: { userId: user.id },
@@ -64,7 +67,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/refresh', async (req, reply) => {
     const body = req.body as { refresh_token: string };
-    if (!body?.refresh_token) {
+    const refreshToken = sanitizeToken(body?.refresh_token, 512);
+    if (!refreshToken) {
       return fail(reply, 'VALIDATION_ERROR', 'refresh_token requerido');
     }
 
@@ -75,7 +79,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     let match: typeof tokens[number] | null = null;
     for (const t of tokens) {
-      if (await bcrypt.compare(body.refresh_token, t.tokenHash)) {
+      if (await bcrypt.compare(refreshToken, t.tokenHash)) {
         match = t;
         break;
       }
@@ -100,7 +104,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/logout', async (req, reply) => {
     const body = req.body as { refresh_token: string };
-    if (!body?.refresh_token) {
+    const refreshToken = sanitizeToken(body?.refresh_token, 512);
+    if (!refreshToken) {
       return ok(reply, { revoked: true });
     }
 
@@ -111,7 +116,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     let match: typeof tokens[number] | null = null;
     for (const t of tokens) {
-      if (await bcrypt.compare(body.refresh_token, t.tokenHash)) {
+      if (await bcrypt.compare(refreshToken, t.tokenHash)) {
         match = t;
         break;
       }

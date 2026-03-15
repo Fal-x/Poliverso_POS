@@ -10,19 +10,26 @@ export interface AuthUser {
   siteId?: string;
 }
 
+export function parseAuthUserFromToken(token: string): AuthUser | null {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET || 'dev_secret') as AuthUser;
+  } catch {
+    return null;
+  }
+}
+
 export function requireAuth(req: FastifyRequest, reply: any, done: any) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return fail(reply, 'UNAUTHORIZED', 'Token requerido', 401);
   }
   const token = header.replace('Bearer ', '');
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret') as AuthUser;
-    (req as any).authUser = payload;
-    done();
-  } catch {
+  const payload = parseAuthUserFromToken(token);
+  if (!payload) {
     return fail(reply, 'UNAUTHORIZED', 'Token inválido', 401);
   }
+  (req as any).authUser = payload;
+  done();
 }
 
 export function requireRole(minRole: UserRole) {
@@ -32,6 +39,17 @@ export function requireRole(minRole: UserRole) {
     if (!user) return fail(reply, 'UNAUTHORIZED', 'Token requerido', 401);
     if (rank[user.role] < rank[minRole]) {
       return fail(reply, 'FORBIDDEN', 'Permisos insuficientes', 403);
+    }
+    done();
+  };
+}
+
+export function requireExactRole(role: UserRole) {
+  return (req: FastifyRequest, reply: any, done: any) => {
+    const user = (req as any).authUser as AuthUser | undefined;
+    if (!user) return fail(reply, 'UNAUTHORIZED', 'Token requerido', 401);
+    if (user.role !== role) {
+      return fail(reply, 'FORBIDDEN', `Este endpoint requiere rol ${role}`, 403);
     }
     done();
   };

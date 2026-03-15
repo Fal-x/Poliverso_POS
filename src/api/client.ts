@@ -1,6 +1,7 @@
 import { clearAuthUser, clearCashState, getAuthUser, setCashOpen } from '@/lib/auth';
+import { resolveApiBaseUrl } from '@/api/baseUrl';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
+const API_URL = resolveApiBaseUrl();
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('pos.accessToken');
@@ -9,8 +10,6 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...(options.headers as Record<string, string> | undefined),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const demoToken = import.meta.env.VITE_DEMO_TOKEN;
-  if (demoToken) headers['x-demo-token'] = demoToken;
 
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -32,6 +31,44 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     throw new Error(json.error?.message || 'Error API');
   }
   return json.data as T;
+}
+
+export async function apiFile(path: string, options: RequestInit = {}): Promise<{ blob: Blob; filename: string | null }> {
+  const token = localStorage.getItem('pos.accessToken');
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (res.status === 401) {
+    clearAuthUser();
+    setCashOpen(false);
+    clearCashState();
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login');
+    }
+    throw new Error('Sesión expirada');
+  }
+
+  if (!res.ok) {
+    try {
+      const json = await res.json();
+      throw new Error(json?.error?.message || 'Error API');
+    } catch {
+      throw new Error('No se pudo descargar el archivo');
+    }
+  }
+
+  const contentDisposition = res.headers.get('content-disposition');
+  const filenameMatch = contentDisposition?.match(/filename="?([^"]+)"?/i);
+  const filename = filenameMatch?.[1] ?? null;
+  const blob = await res.blob();
+  return { blob, filename };
 }
 
 export function getSiteId() {

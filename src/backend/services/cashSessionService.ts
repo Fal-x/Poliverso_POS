@@ -1,6 +1,5 @@
 import {
   AuditAction,
-  CashCountType,
   CashMovementType,
   CashSessionStatus,
   EntityType,
@@ -8,6 +7,7 @@ import {
   PermissionCode,
   Prisma,
   SaleStatus,
+  ShiftStatus,
 } from "@prisma/client";
 import { prisma } from "../prisma";
 import {
@@ -18,8 +18,10 @@ import {
   assertUserHasPermission,
   DomainError,
 } from "../validation/cashSessionValidators";
+import { publishSiteNotification } from "../api/realtime/notificationHub";
 
 const D = (value: number | string | Prisma.Decimal) => new Prisma.Decimal(value);
+const HIGH_CASH_THRESHOLD = D(500000);
 
 // ---- Public API ----
 
@@ -30,7 +32,6 @@ export async function openCashSession(args: {
   shiftId?: string | null;
   openedByUserId: string;
   openingCashAmount: Prisma.Decimal;
-  denominations: Prisma.JsonValue;
   approvalId?: string | null;
 }) {
   await assertUserHasPermission({
@@ -44,16 +45,27 @@ export async function openCashSession(args: {
       terminalId: args.terminalId,
       status: CashSessionStatus.OPEN,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      openedByUserId: true,
+      cashRegisterId: true,
+      shiftId: true,
+    },
   });
-  assertNoOpenSession(openSession?.id);
+  if (openSession) {
+    if (openSession.openedByUserId !== args.openedByUserId || openSession.cashRegisterId !== args.cashRegisterId) {
+      assertNoOpenSession(openSession.id);
+    }
+  }
 
-  const suggested = await getSuggestedOpeningCash({
+  const openingReference = await getOpeningReference({
+    siteId: args.siteId,
     terminalId: args.terminalId,
     cashRegisterId: args.cashRegisterId,
   });
+  const suggested = openingReference.suggestedOpeningCash;
 
-  if (!suggested.equals(args.openingCashAmount) && !args.approvalId && !args.openingCashAmount.lte(D(0))) {
+  if (!suggested.equals(args.openingCashAmount) && !args.approvalId) {
     throw new DomainError("La apertura requiere autorización para ajustar el efectivo sugerido.");
   }
   if (args.approvalId) {
@@ -61,28 +73,109 @@ export async function openCashSession(args: {
   }
 
   return prisma.$transaction(async (tx) => {
+    let resolvedShiftId = args.shiftId ?? null;
+    if (!resolvedShiftId) {
+      const existingShift = await tx.shift.findFirst({
+        where: {
+          siteId: args.siteId,
+          terminalId: args.terminalId,
+          cashRegisterId: args.cashRegisterId,
+          status: ShiftStatus.OPEN,
+        },
+        select: { id: true },
+      });
+      if (existingShift) {
+        resolvedShiftId = existingShift.id;
+      } else {
+        const createdShift = await tx.shift.create({
+          data: {
+            siteId: args.siteId,
+            terminalId: args.terminalId,
+            cashRegisterId: args.cashRegisterId,
+            openedById: args.openedByUserId,
+            openedAt: new Date(),
+            openingCash: args.openingCashAmount,
+            status: ShiftStatus.OPEN,
+            notes: "Turno abierto automáticamente por apertura de caja.",
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            siteId: args.siteId,
+            actorId: args.openedByUserId,
+            action: AuditAction.OPEN,
+            entityType: EntityType.SHIFT,
+            entityId: createdShift.id,
+            after: {
+              openingCash: createdShift.openingCash.toFixed(2),
+              terminalId: args.terminalId,
+              cashRegisterId: args.cashRegisterId,
+              autoOpened: true,
+            },
+          },
+        });
+
+        resolvedShiftId = createdShift.id;
+      }
+    }
+
+    if (openSession) {
+      if (!openSession.shiftId) {
+        if (!resolvedShiftId) {
+          const createdShift = await tx.shift.create({
+            data: {
+              siteId: args.siteId,
+              terminalId: args.terminalId,
+              cashRegisterId: args.cashRegisterId,
+              openedById: args.openedByUserId,
+              openedAt: new Date(),
+              openingCash: args.openingCashAmount,
+              status: ShiftStatus.OPEN,
+              notes: "Turno abierto automáticamente por caja existente.",
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              siteId: args.siteId,
+              actorId: args.openedByUserId,
+              action: AuditAction.OPEN,
+              entityType: EntityType.SHIFT,
+              entityId: createdShift.id,
+              after: {
+                openingCash: createdShift.openingCash.toFixed(2),
+                terminalId: args.terminalId,
+                cashRegisterId: args.cashRegisterId,
+                autoOpened: true,
+                reason: "attach_to_existing_cash_session",
+              },
+            },
+          });
+
+          resolvedShiftId = createdShift.id;
+        }
+
+        await tx.cashSession.update({
+          where: { id: openSession.id },
+          data: { shiftId: resolvedShiftId },
+        });
+      }
+
+      return tx.cashSession.findUniqueOrThrow({ where: { id: openSession.id } });
+    }
+
     const session = await tx.cashSession.create({
       data: {
         siteId: args.siteId,
         terminalId: args.terminalId,
         cashRegisterId: args.cashRegisterId,
-        shiftId: args.shiftId ?? null,
+        shiftId: resolvedShiftId,
         openedByUserId: args.openedByUserId,
         openingCashAmount: args.openingCashAmount,
         expectedCashAmount: args.openingCashAmount,
         status: CashSessionStatus.OPEN,
         openedApprovalId: args.approvalId ?? null,
-      },
-    });
-
-    await tx.cashCount.create({
-      data: {
-        siteId: args.siteId,
-        cashSessionId: session.id,
-        type: CashCountType.OPENING,
-        denominations: args.denominations,
-        totalAmount: args.openingCashAmount,
-        countedByUserId: args.openedByUserId,
       },
     });
 
@@ -134,11 +227,16 @@ export async function registerCashMovement(args: {
 
   return prisma.$transaction(async (tx) => {
     const session = await tx.cashSession.findFirst({
-      where: { id: args.cashSessionId, status: CashSessionStatus.OPEN },
+      where: { id: args.cashSessionId, siteId: args.siteId, status: CashSessionStatus.OPEN },
     });
 
     if (!session) {
       throw new DomainError("No existe una caja abierta para registrar movimientos.");
+    }
+
+    const currentExpectedCash = await syncExpectedCashForSession(tx, session.id);
+    if (args.type === CashMovementType.WITHDRAWAL && args.amount.greaterThan(currentExpectedCash)) {
+      throw new DomainError("El retiro no puede ser mayor al efectivo disponible en caja.");
     }
 
     const movement = await tx.cashMovement.create({
@@ -154,14 +252,7 @@ export async function registerCashMovement(args: {
       },
     });
 
-    const delta = args.type === CashMovementType.WITHDRAWAL ? args.amount.mul(-1) : args.amount;
-
-    await tx.cashSession.update({
-      where: { id: session.id },
-      data: {
-        expectedCashAmount: session.expectedCashAmount.add(delta),
-      },
-    });
+    const expected = await syncExpectedCashForSession(tx, session.id);
 
     await tx.auditLog.create({
       data: {
@@ -174,6 +265,7 @@ export async function registerCashMovement(args: {
           type: args.type,
           amount: args.amount.toFixed(2),
           reason: args.reason,
+          expectedCashAmount: expected.toFixed(2),
         },
       },
     });
@@ -186,7 +278,6 @@ export async function closeCashSession(args: {
   siteId: string;
   cashSessionId: string;
   closedByUserId: string;
-  denominations: Prisma.JsonValue;
   closingCashAmount: Prisma.Decimal;
   closeReason?: string | null;
   approvalId?: string | null;
@@ -199,7 +290,7 @@ export async function closeCashSession(args: {
 
   return prisma.$transaction(async (tx) => {
     const session = await tx.cashSession.findFirst({
-      where: { id: args.cashSessionId, status: CashSessionStatus.OPEN },
+      where: { id: args.cashSessionId, siteId: args.siteId, status: CashSessionStatus.OPEN },
     });
 
     if (!session) {
@@ -214,30 +305,8 @@ export async function closeCashSession(args: {
       throw new DomainError("Existen ventas abiertas; cierre bloqueado.");
     }
 
-    const paymentsByMethod = await tx.salePayment.groupBy({
-      by: ["method"],
-      where: { sale: { cashSessionId: session.id, status: SaleStatus.PAID } },
-      _sum: { amount: true },
-    });
-
-    const cashSales = paymentsByMethod
-      .filter(p => p.method === PaymentMethod.CASH)
-      .reduce((sum, p) => sum.add(p._sum.amount ?? D(0)), D(0));
-
-    const withdrawals = await tx.cashMovement.aggregate({
-      where: { cashSessionId: session.id, type: CashMovementType.WITHDRAWAL },
-      _sum: { amount: true },
-    });
-
-    const adjustments = await tx.cashMovement.aggregate({
-      where: { cashSessionId: session.id, type: CashMovementType.ADJUSTMENT },
-      _sum: { amount: true },
-    });
-
-    const expected = session.openingCashAmount
-      .add(cashSales)
-      .minus(withdrawals._sum.amount ?? D(0))
-      .add(adjustments._sum.amount ?? D(0));
+    const expected = await syncExpectedCashForSession(tx, session.id);
+    const cashSales = await getCashSalesForSession(tx, session.id);
 
     const difference = args.closingCashAmount.sub(expected);
 
@@ -251,17 +320,6 @@ export async function closeCashSession(args: {
         siteId: args.siteId,
       });
     }
-
-    await tx.cashCount.create({
-      data: {
-        siteId: args.siteId,
-        cashSessionId: session.id,
-        type: CashCountType.CLOSING,
-        denominations: args.denominations,
-        totalAmount: args.closingCashAmount,
-        countedByUserId: args.closedByUserId,
-      },
-    });
 
     const closed = await tx.cashSession.update({
       where: { id: session.id },
@@ -304,14 +362,91 @@ export async function closeCashSession(args: {
   });
 }
 
+export async function voidCashMovement(args: {
+  siteId: string;
+  cashSessionId: string;
+  movementId: string;
+  voidedByUserId: string;
+  approvalId: string;
+  reason: string;
+}) {
+  assertReason(args.reason);
+
+  await assertUserHasPermission({
+    userId: args.voidedByUserId,
+    siteId: args.siteId,
+    permission: PermissionCode.CASH_WITHDRAWAL_CREATE,
+  });
+
+  await assertSupervisorApproval({
+    approvalId: args.approvalId,
+    siteId: args.siteId,
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.cashSession.findFirst({
+      where: { id: args.cashSessionId, siteId: args.siteId, status: CashSessionStatus.OPEN },
+    });
+
+    if (!session) {
+      throw new DomainError("No existe una caja abierta para anular movimientos.");
+    }
+
+    const movement = await tx.cashMovement.findFirst({
+      where: {
+        id: args.movementId,
+        cashSessionId: args.cashSessionId,
+        voidedAt: null,
+      },
+    });
+
+    if (!movement) {
+      throw new DomainError("Movimiento no encontrado o ya anulado.");
+    }
+
+    await tx.cashMovement.update({
+      where: { id: movement.id },
+      data: {
+        voidedAt: new Date(),
+        voidedByUserId: args.voidedByUserId,
+        voidedApprovalId: args.approvalId,
+        voidReason: args.reason,
+      },
+    });
+
+    const expected = await syncExpectedCashForSession(tx, session.id);
+
+    await tx.auditLog.create({
+      data: {
+        siteId: args.siteId,
+        actorId: args.voidedByUserId,
+        action: AuditAction.VOID,
+        entityType: EntityType.CASH_SESSION,
+        entityId: session.id,
+        after: {
+          movementId: movement.id,
+          amount: movement.amount.toFixed(2),
+          type: movement.type,
+          reason: args.reason,
+          expectedCashAmount: expected.toFixed(2),
+        },
+      },
+    });
+
+    return movement;
+  });
+}
+
 // ---- Helpers ----
 
-async function getSuggestedOpeningCash(args: {
+export async function getOpeningReference(args: {
+  siteId: string;
   terminalId: string;
   cashRegisterId: string;
 }) {
   const lastClosed = await prisma.cashSession.findFirst({
     where: {
+      siteId: args.siteId,
       terminalId: args.terminalId,
       cashRegisterId: args.cashRegisterId,
       status: CashSessionStatus.CLOSED,
@@ -319,26 +454,145 @@ async function getSuggestedOpeningCash(args: {
     orderBy: { closedAt: "desc" },
   });
 
-  if (!lastClosed) {
-    return D(0);
+  const lastClosedCash =
+    lastClosed?.closingCashAmount ??
+    lastClosed?.expectedCashAmount ??
+    lastClosed?.openingCashAmount ??
+    D(0);
+
+  return {
+    suggestedOpeningCash: lastClosedCash,
+    lastClosedCash,
+    lastClosedAt: lastClosed?.closedAt ?? null,
+    lastSessionId: lastClosed?.id ?? null,
+  };
+}
+
+export async function getCashSessionFinancials(args: {
+  siteId: string;
+  cashSessionId: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.cashSession.findUnique({
+      where: { id: args.cashSessionId },
+    });
+
+    if (!session || session.siteId !== args.siteId) {
+      throw new DomainError("Caja no encontrada.");
+    }
+
+    const cashSales = await getCashSalesForSession(tx, session.id);
+    const withdrawals = await tx.cashMovement.aggregate({
+      where: { cashSessionId: session.id, type: CashMovementType.WITHDRAWAL, voidedAt: null },
+      _sum: { amount: true },
+    });
+    const adjustments = await tx.cashMovement.aggregate({
+      where: { cashSessionId: session.id, type: CashMovementType.ADJUSTMENT, voidedAt: null },
+      _sum: { amount: true },
+    });
+    const expected = await syncExpectedCashForSession(tx, session.id);
+
+    return {
+      session,
+      cashSales,
+      withdrawals: withdrawals._sum.amount ?? D(0),
+      adjustments: adjustments._sum.amount ?? D(0),
+      expectedCash: expected,
+    };
+  });
+}
+
+export async function syncExpectedCashAmount(args: {
+  siteId: string;
+  cashSessionId: string;
+}) {
+  const result = await prisma.$transaction(async (tx) => {
+    const session = await tx.cashSession.findUnique({
+      where: { id: args.cashSessionId },
+    });
+
+    if (!session || session.siteId !== args.siteId) {
+      throw new DomainError("Caja no encontrada.");
+    }
+
+    const expected = await syncExpectedCashForSession(tx, session.id);
+    return {
+      sessionId: session.id,
+      expected,
+      crossedThreshold:
+        session.expectedCashAmount.lessThan(HIGH_CASH_THRESHOLD)
+        && expected.greaterThanOrEqualTo(HIGH_CASH_THRESHOLD),
+    };
+  });
+
+  if (result.crossedThreshold) {
+    publishSiteNotification(args.siteId, {
+      type: 'cash_threshold_alert',
+      site_id: args.siteId,
+      created_at: new Date().toISOString(),
+      message: 'La caja superó el umbral de efectivo recomendado.',
+      data: {
+        cash_session_id: result.sessionId,
+        expected_cash_amount: result.expected.toFixed(2),
+        threshold_amount: HIGH_CASH_THRESHOLD.toFixed(2),
+      },
+    });
   }
 
-  const base =
-    lastClosed.closingCashAmount ??
-    lastClosed.expectedCashAmount ??
-    lastClosed.openingCashAmount;
+  return { sessionId: result.sessionId, expected: result.expected };
+}
 
-  const withdrawalsAfter = await prisma.cashMovement.aggregate({
+async function getCashSalesForSession(tx: Prisma.TransactionClient, cashSessionId: string) {
+  const paymentsByMethod = await tx.salePayment.groupBy({
+    by: ["method"],
+    where: { sale: { cashSessionId, status: { in: [SaleStatus.PAID, SaleStatus.PARTIAL] } } },
+    _sum: { amount: true },
+  });
+
+  return paymentsByMethod
+    .filter(p => p.method === PaymentMethod.CASH)
+    .reduce((sum, p) => sum.add(p._sum.amount ?? D(0)), D(0));
+}
+
+async function syncExpectedCashForSession(tx: Prisma.TransactionClient, cashSessionId: string) {
+  const session = await tx.cashSession.findUnique({
+    where: { id: cashSessionId },
+    select: { id: true, openingCashAmount: true, expectedCashAmount: true },
+  });
+
+  if (!session) {
+    throw new DomainError("Caja no encontrada.");
+  }
+
+  const cashSales = await getCashSalesForSession(tx, cashSessionId);
+  const withdrawals = await tx.cashMovement.aggregate({
     where: {
+      cashSessionId,
       type: CashMovementType.WITHDRAWAL,
-      createdAt: { gt: lastClosed.closedAt ?? lastClosed.openedAt },
-      cashSession: {
-        terminalId: args.terminalId,
-        cashRegisterId: args.cashRegisterId,
-      },
+      voidedAt: null,
+    },
+    _sum: { amount: true },
+  });
+  const adjustments = await tx.cashMovement.aggregate({
+    where: {
+      cashSessionId,
+      type: CashMovementType.ADJUSTMENT,
+      voidedAt: null,
     },
     _sum: { amount: true },
   });
 
-  return base.sub(withdrawalsAfter._sum.amount ?? D(0));
+  const expected = session.openingCashAmount
+    .add(cashSales)
+    .minus(withdrawals._sum.amount ?? D(0))
+    .add(adjustments._sum.amount ?? D(0));
+
+  if (!session.expectedCashAmount.equals(expected)) {
+    await tx.cashSession.update({
+      where: { id: session.id },
+      data: { expectedCashAmount: expected },
+    });
+  }
+
+  return expected;
 }

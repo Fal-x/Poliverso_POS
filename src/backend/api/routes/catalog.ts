@@ -51,6 +51,8 @@ export async function catalogRoutes(app: FastifyInstance) {
       price: p.price.toFixed(2),
       category: p.category,
       sku: p.sku,
+      analytics_category: p.analyticsCategory,
+      analytics_subcategory: p.analyticsSubcategory,
     })));
   });
 
@@ -75,6 +77,8 @@ export async function catalogRoutes(app: FastifyInstance) {
       min_recharge_amount: config.minRechargeAmount.toFixed(2),
       points_per_currency: config.pointsPerCurrency,
       currency_unit: config.currencyUnit,
+      daily_sales_goal: config.dailySalesGoal.toFixed(2),
+      credit_term_days: config.creditTermDays,
     });
   });
 
@@ -90,9 +94,12 @@ export async function catalogRoutes(app: FastifyInstance) {
       id: a.id,
       name: a.name,
       code: a.code,
-      price_per_use: a.cost.toFixed(2),
+      machine_type: a.type,
+      location: a.location,
+      price_per_use: a.price.toFixed(2),
       readers: a.readers.length,
-      status: a.isActive ? 'active' : 'inactive',
+      assigned_readers: a.readers.map((reader) => ({ id: reader.id, code: reader.code, position: reader.position })),
+      status: a.status.toLowerCase(),
     })));
   });
 
@@ -103,11 +110,17 @@ export async function catalogRoutes(app: FastifyInstance) {
       where: { siteId, category: 'PRIZE', isActive: true },
       orderBy: { name: 'asc' },
     });
+    const stockRows = await prisma.inventoryMovement.groupBy({
+      by: ['itemId'],
+      where: { siteId, itemId: { in: prizes.map((prize) => prize.id) } },
+      _sum: { quantity: true },
+    });
+    const stockByItemId = new Map(stockRows.map((row) => [row.itemId, Number(row._sum.quantity ?? 0)]));
     return ok(reply, prizes.map(p => ({
       id: p.id,
       name: p.name,
-      stock: 0,
-      points_required: 0,
+      stock: stockByItemId.get(p.id) ?? 0,
+      points_required: p.pointsCost,
     })));
   });
 }

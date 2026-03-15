@@ -10,9 +10,16 @@ import { cashRoutes } from './routes/cash';
 import { salesRoutes } from './routes/sales';
 import { cardRoutes } from './routes/cards';
 import { userRoutes } from './routes/users';
-import { stubRoutes } from './routes/stubs';
 import { catalogRoutes } from './routes/catalog';
+import { reportRoutes } from './routes/reports';
+import { adminRoutes } from './routes/admin';
+import { espRoutes } from './routes/esp';
+import { notificationRoutes } from './routes/notifications';
+import { programRoutes } from './routes/programs';
+import { eventRoutes } from './routes/events';
+import { prizeRoutes } from './routes/prizes';
 import { fail } from './utils/response';
+import { DomainError } from '@/backend/validation/cashSessionValidators';
 
 export async function buildServer() {
   const corsOrigins = (process.env.CORS_ORIGINS || '')
@@ -39,6 +46,10 @@ export async function buildServer() {
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
+      const isLocalDevOrigin = /^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+      if (isLocalDevOrigin) {
+        return cb(null, true);
+      }
       if (corsOrigins.length === 0) return cb(null, true);
       const allowed = corsOrigins.some((value) => {
         if (value.startsWith('regex:')) {
@@ -68,6 +79,9 @@ export async function buildServer() {
   await app.register(swaggerUI, { routePrefix: '/docs' });
 
   app.setErrorHandler((error, _req, reply) => {
+    if (error instanceof DomainError) {
+      return fail(reply, 'DOMAIN_ERROR', error.message, 409);
+    }
     app.log.error(error);
     return fail(reply, 'INTERNAL_ERROR', 'Error interno', 500);
   });
@@ -85,17 +99,6 @@ export async function buildServer() {
   }
 
   app.register(async (v1) => {
-    v1.addHook('preHandler', async (req, reply) => {
-      if (req.method === 'OPTIONS') return;
-      const demoToken = process.env.DEMO_TOKEN;
-      if (!demoToken) return;
-      const header = req.headers['x-demo-token'];
-      const token = Array.isArray(header) ? header[0] : header;
-      if (token !== demoToken) {
-        return fail(reply, 'DEMO_TOKEN_REQUIRED', 'Acceso de demo requerido', 401);
-      }
-    });
-
     await authRoutes(v1);
     await approvalRoutes(v1);
     await userRoutes(v1);
@@ -103,7 +106,13 @@ export async function buildServer() {
     await cashRoutes(v1);
     await salesRoutes(v1);
     await cardRoutes(v1);
-    await stubRoutes(v1);
+    await reportRoutes(v1);
+    await programRoutes(v1);
+    await eventRoutes(v1);
+    await prizeRoutes(v1);
+    await adminRoutes(v1);
+    await espRoutes(v1);
+    await notificationRoutes(v1);
   }, { prefix: '/api/v1' });
 
   return app;

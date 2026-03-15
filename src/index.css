@@ -62,44 +62,44 @@
 
   .dark {
     /* === Dark Mode Operacional - Modo Principal === */
-    --background: 222 47% 6%;
+    --background: 0 0% 5%;
     --foreground: 210 40% 98%;
 
-    --card: 217 33% 12%;
+    --card: 242 39% 18%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 217 33% 12%;
+    --popover: 242 39% 18%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 214 78% 58%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 180 68% 45%;
+    --primary-foreground: 0 0% 7%;
 
-    --secondary: 217 33% 17%;
+    --secondary: 241 33% 24%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 242 30% 16%;
+    --muted-foreground: 215 20% 72%;
 
-    --accent: 45 96% 56%;
+    --accent: 45 92% 49%;
     --accent-foreground: 20 14% 10%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 344 79% 49%;
     --destructive-foreground: 0 0% 100%;
 
     --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 42 96% 52%;
+    --warning: 45 92% 49%;
     --warning-foreground: 20 14% 10%;
 
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 214 78% 58%;
+    --border: 241 24% 31%;
+    --input: 241 24% 27%;
+    --ring: 180 68% 45%;
 
     /* === Tokens Operacionales Dark === */
-    --surface: 217 33% 12%;
+    --surface: 242 39% 18%;
     --surface-foreground: 210 40% 98%;
-    --surface-elevated: 217 33% 17%;
+    --surface-elevated: 241 33% 24%;
   }
 }
 
@@ -109,7 +109,7 @@
   }
 
   html {
-    @apply dark;
+    @apply antialiased;
   }
 
   body {
@@ -224,16 +224,36 @@
 
   /* === Layouts POS === */
   .pos-header {
-    @apply h-16 bg-surface border-b border-border flex items-center justify-between px-6
+    @apply h-16 bg-[#1D1C40] text-slate-100 border-b border-[#2f2e55] flex items-center justify-between px-6
            sticky top-0 z-30 shadow-sm;
   }
 
   .pos-sidebar {
-    @apply w-64 bg-surface border-r border-border flex flex-col h-full;
+    @apply w-64 bg-slate-100 text-slate-900 border-r border-slate-200 flex flex-col h-full;
+  }
+
+  .pos-header .text-muted-foreground {
+    @apply text-slate-300;
+  }
+
+  .pos-sidebar .text-muted-foreground {
+    @apply text-slate-500;
   }
 
   .pos-main {
     @apply flex-1 overflow-auto p-6;
+  }
+
+  .pos-content {
+    @apply bg-background;
+  }
+
+  .pos-content-panel {
+    @apply bg-background border border-border rounded-xl;
+  }
+
+  .pos-sidebar-right {
+    @apply bg-card border-l border-border text-card-foreground;
   }
 
   /* === Indicadores de Estado === */
@@ -321,7 +341,7 @@
   /* === Teclado Numérico === */
   .numpad-btn {
     @apply flex items-center justify-center text-2xl font-semibold
-           bg-secondary hover:bg-secondary/80 rounded-xl h-16
+           bg-secondary hover:bg-secondary/85 border border-border/70 rounded-xl h-16
            transition-all active:scale-95 select-none;
   }
 
@@ -358,7 +378,7 @@
   /* === Chips / Tabs === */
   .chip-pos {
     @apply px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all
-           bg-secondary text-muted-foreground hover:bg-secondary/80;
+           bg-secondary/85 text-muted-foreground border border-border/60 hover:bg-secondary;
   }
 
   .chip-pos-active {
@@ -367,12 +387,16 @@
 
   /* === Option Tiles === */
   .tile-option {
-    @apply p-3 rounded-xl flex items-center gap-2 transition-all border border-border
-           bg-secondary/70 hover:bg-secondary;
+    @apply p-3 rounded-lg flex items-center gap-2 transition-all border border-border/70
+           bg-muted/70 hover:bg-muted;
+  }
+
+  .tile-option-muted {
+    @apply text-muted-foreground;
   }
 
   .tile-option-active {
-    @apply bg-primary text-primary-foreground border-primary/40 shadow-soft;
+    @apply bg-primary/90 text-primary-foreground border-primary/50 shadow-md;
   }
 
   /* === Animaciones === */
@@ -419,13 +443,39 @@
     }
   }
 
+  @keyframes pressSpring {
+    0% {
+      transform: scale(1);
+    }
+    35% {
+      transform: scale(0.95);
+    }
+    70% {
+      transform: scale(1.05);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  button:not(:disabled):active {
+    animation: pressSpring 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button:not(:disabled):active {
+      animation: none;
+    }
+  }
+
   /* === Overlays y Modales === */
   .modal-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 md:p-8 lg:p-10;
+    @apply fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4 lg:p-6;
   }
 
   .modal-content {
-    @apply bg-card rounded-2xl border border-border shadow-2xl max-h-[85vh] md:max-h-[80vh] overflow-auto
+    @apply bg-white text-slate-900 rounded-xl border border-slate-200 shadow-[0_10px_32px_rgba(15,23,42,0.16)] overflow-visible
            fade-in;
   }
 
@@ -444,6 +494,10 @@
   /* === Glass Effect === */
   .glass {
     @apply bg-card/70 backdrop-blur-md border border-border/50;
+  }
+
+  .btn-glass {
+    @apply bg-slate-900/40 backdrop-blur-md border border-slate-600/50;
   }
 }
 

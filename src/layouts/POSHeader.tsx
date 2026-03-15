@@ -1,6 +1,12 @@
-import { Clock, MapPin, User, Monitor, LogOut, ShieldCheck, Crown } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Clock, MapPin, User, Monitor, LogOut, ShieldCheck, Crown, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
+
+type HeaderViewOption = {
+  key: string;
+  label: string;
+  onClick: () => void;
+};
 
 interface POSHeaderProps {
   location?: string;
@@ -10,6 +16,8 @@ interface POSHeaderProps {
   showClock?: boolean;
   onLogout?: () => void;
   logoutDisabled?: boolean;
+  viewOptions?: HeaderViewOption[];
+  currentViewLabel?: string;
 }
 
 export function POSHeader({ 
@@ -19,15 +27,31 @@ export function POSHeader({
   userRole = "Cajero",
   showClock = true,
   onLogout,
-  logoutDisabled = false
+  logoutDisabled = false,
+  viewOptions = [],
+  currentViewLabel
 }: POSHeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!showClock) return;
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, [showClock]);
+
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target || !viewMenuRef.current?.contains(target)) {
+        setViewMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    return () => window.removeEventListener('mousedown', onPointerDown);
+  }, [viewMenuOpen]);
 
   const formattedTime = currentTime.toLocaleTimeString('es-CO', { 
     hour: '2-digit', 
@@ -42,15 +66,17 @@ export function POSHeader({
   });
 
   return (
-    <header className="pos-header">
+    <header className="pos-header px-6">
       {/* Logo y Marca */}
-      <div className="flex items-center gap-4">
-        <div className="h-10 w-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold text-xl shadow-glow">
-          P
-        </div>
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">POLIVERSO</h1>
-          <p className="text-xs text-muted-foreground">POS Terminal</p>
+      <div className="flex shrink-0 items-center w-[130px] sm:w-[170px] md:w-[210px] lg:w-[250px]">
+        <div className="relative h-10 sm:h-11 md:h-12 w-full overflow-visible">
+          <img
+            src="/poliverso-logo.svg"
+            alt="Poliverso"
+            className="absolute left-1/2 top-1/2 h-10 sm:h-12 md:h-14 lg:h-16 w-auto -translate-x-1/2 -translate-y-1/2 object-contain"
+            loading="eager"
+            decoding="async"
+          />
         </div>
       </div>
 
@@ -97,6 +123,37 @@ export function POSHeader({
             <LogOut className="h-4 w-4" />
             <span className="hidden md:inline">Salir</span>
           </button>
+        )}
+
+        {viewOptions.length > 0 && (
+          <div ref={viewMenuRef} className="relative flex items-center gap-2">
+            <button
+              onClick={() => setViewMenuOpen((prev) => !prev)}
+              className="h-9 px-3 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 flex items-center gap-2 text-sm font-semibold"
+              title="Cambiar de vista"
+              aria-haspopup="menu"
+              aria-expanded={viewMenuOpen}
+            >
+              <span className="hidden md:inline">Vistas</span>
+              <ChevronDown className={cn('h-4 w-4 transition-transform', viewMenuOpen && 'rotate-180')} />
+            </button>
+            {viewMenuOpen && (
+              <div className="absolute right-0 top-11 z-50 min-w-[190px] overflow-hidden rounded-lg border border-border bg-white shadow-xl">
+                {viewOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    onClick={() => {
+                      setViewMenuOpen(false);
+                      option.onClick();
+                    }}
+                    className="flex w-full items-center px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {showClock && (

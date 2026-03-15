@@ -1,5 +1,7 @@
 # POLIVERSO - API Endpoints
 
+> Estado: documento histórico. Para endpoints vigentes usar `docs/API_V1.md`.
+
 ## Base URL
 ```
 Production: https://api.poliverso.com/v1

@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { X, AlertTriangle, CheckCircle, Info, XCircle } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { POSButton } from './POSButton';
 
@@ -15,6 +16,9 @@ interface POSModalProps {
   children: ReactNode;
   showClose?: boolean;
   footer?: ReactNode;
+  overlayClassName?: string;
+  contentClassName?: string;
+  bodyClassName?: string;
 }
 
 const typeStyles: Record<ModalType, { icon: typeof AlertTriangle; color: string }> = {
@@ -42,48 +46,67 @@ export function POSModal({
   children,
   showClose = true,
   footer,
+  overlayClassName,
+  contentClassName,
+  bodyClassName,
 }: POSModalProps) {
-  if (!isOpen) return null;
-
   const { icon: Icon, color } = typeStyles[type];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div 
-        className={cn('modal-content w-full', sizeStyles[size])}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        {(title || showClose) && (
-          <div className="flex items-center justify-between p-6 md:p-8 border-b border-border">
-            <div className="flex items-center gap-3">
-              {type !== 'default' && <Icon className={cn('h-6 w-6', color)} />}
-              {title && <h2 className="text-xl font-semibold">{title}</h2>}
-            </div>
-            {showClose && (
-              <button
-                onClick={onClose}
-                className="p-2 rounded-lg hover:bg-secondary transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12 }}
+          className={cn('modal-overlay', overlayClassName)}
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className={cn('modal-content relative overflow-hidden w-full', sizeStyles[size], contentClassName)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-slate-100/60 to-transparent" />
+            <div className="relative z-10">
+            {/* Header */}
+            {(title || showClose) && (
+              <div className="flex items-center justify-between px-6 py-2 md:px-7 md:py-2.5 border-b border-border/50">
+                <div className="flex items-center gap-3">
+                  {type !== 'default' && <Icon className={cn('h-6 w-6', color)} />}
+                  {title && <h2 className="text-base font-semibold tracking-tight">{title}</h2>}
+                </div>
+                {showClose && (
+                  <button
+                    onClick={onClose}
+                    className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                )}
+              </div>
             )}
-          </div>
-        )}
 
-        {/* Content */}
-        <div className="p-6 md:p-8">
-          {children}
-        </div>
+            {/* Content */}
+            <div className={cn('px-6 pt-3 pb-6 md:px-8 md:pt-4 md:pb-8', bodyClassName)}>
+              {children}
+            </div>
 
-        {/* Footer */}
-        {footer && (
-          <div className="flex items-center justify-end gap-3 p-6 md:p-8 border-t border-border">
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+            {/* Footer */}
+            {footer && (
+              <div className="flex items-center justify-end gap-3 p-6 md:p-8 border-t border-border">
+                {footer}
+              </div>
+            )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -181,30 +204,44 @@ interface SyncModalProps {
 }
 
 export function SyncModal({ isOpen, status, message }: SyncModalProps) {
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay">
-      <div className="modal-content p-8 text-center">
-        {status === 'syncing' && (
-          <>
-            <div className="h-16 w-16 mx-auto mb-4 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <p className="text-lg font-medium">{message || 'Sincronizando...'}</p>
-          </>
-        )}
-        {status === 'success' && (
-          <>
-            <CheckCircle className="h-16 w-16 mx-auto mb-4 text-success" />
-            <p className="text-lg font-medium">{message || 'Sincronización exitosa'}</p>
-          </>
-        )}
-        {status === 'error' && (
-          <>
-            <XCircle className="h-16 w-16 mx-auto mb-4 text-destructive" />
-            <p className="text-lg font-medium">{message || 'Error de sincronización'}</p>
-          </>
-        )}
-      </div>
-    </div>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12 }}
+          className="modal-overlay"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="modal-content p-8 text-center"
+          >
+            {status === 'syncing' && (
+              <>
+                <div className="h-16 w-16 mx-auto mb-4 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                <p className="text-lg font-medium">{message || 'Sincronizando...'}</p>
+              </>
+            )}
+            {status === 'success' && (
+              <>
+                <CheckCircle className="h-16 w-16 mx-auto mb-4 text-success" />
+                <p className="text-lg font-medium">{message || 'Sincronización exitosa'}</p>
+              </>
+            )}
+            {status === 'error' && (
+              <>
+                <XCircle className="h-16 w-16 mx-auto mb-4 text-destructive" />
+                <p className="text-lg font-medium">{message || 'Error de sincronización'}</p>
+              </>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

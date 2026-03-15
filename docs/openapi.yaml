@@ -51,7 +51,7 @@ components:
         expires_at: { type: string, format: date-time }
     CashSessionOpenRequest:
       type: object
-      required: [site_id, terminal_id, cash_register_id, opened_by_user_id, opening_cash_amount, denominations]
+      required: [site_id, terminal_id, cash_register_id, opened_by_user_id, opening_cash_amount]
       properties:
         site_id: { type: string }
         terminal_id: { type: string }
@@ -59,16 +59,14 @@ components:
         shift_id: { type: string }
         opened_by_user_id: { type: string }
         opening_cash_amount: { type: string }
-        denominations: { type: object, additionalProperties: { type: integer } }
         approval_id: { type: string, nullable: true }
     CashSessionCloseRequest:
       type: object
-      required: [site_id, closed_by_user_id, closing_cash_amount, denominations]
+      required: [site_id, closed_by_user_id, closing_cash_amount]
       properties:
         site_id: { type: string }
         closed_by_user_id: { type: string }
         closing_cash_amount: { type: string }
-        denominations: { type: object, additionalProperties: { type: integer } }
         close_reason: { type: string }
         approval_id: { type: string, nullable: true }
     SupervisorApprovalRequest:
