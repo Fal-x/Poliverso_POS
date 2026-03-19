@@ -150,7 +150,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className="fixed right-4 top-4 z-20">
+      <div className="fixed left-4 top-4 z-20">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface shadow-soft">
           <img
             src="/poliverso-logo.svg"

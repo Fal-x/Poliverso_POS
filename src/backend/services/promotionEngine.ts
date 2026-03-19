@@ -1,4 +1,4 @@
-import type { Prisma, Promotion } from '@prisma/client';
+import { Prisma, type Promotion } from '@prisma/client';
 import { prisma } from '@/backend/prisma';
 
 type RechargePromotionResult = {

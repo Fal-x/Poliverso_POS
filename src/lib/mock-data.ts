@@ -118,7 +118,7 @@ export const mockRecentSales: Sale[] = [
     subtotal: 24000,
     discount: 0,
     total: 24000,
-    paymentMethod: 'transfer',
+    paymentMethod: 'transfer_account_1',
     status: 'completed',
     requiresInvoice: true,
     createdAt: new Date(Date.now() - 15 * 60000),

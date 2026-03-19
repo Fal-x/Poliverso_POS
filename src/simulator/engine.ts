@@ -368,7 +368,6 @@ async function startWorkers(siteRuntimes: SiteRuntime[], logger: pino.Logger): P
 
       const worker = new Worker(new URL('./agents/cashier.worker.mjs', import.meta.url), {
         workerData: init,
-        type: 'module',
       });
 
       worker.on('error', (error) => {

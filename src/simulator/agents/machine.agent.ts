@@ -9,6 +9,7 @@ export type MachineReader = {
   code: string;
   siteId: string;
   attractionId: string;
+  attractionCode: string;
 };
 
 export class MachineAgent {

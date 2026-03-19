@@ -67,6 +67,7 @@ const INVENTORY_REASON_OPTIONS = [
   'CORTESIA',
 ] as const;
 type InventoryReason = (typeof INVENTORY_REASON_OPTIONS)[number];
+const READER_STATUS_OFFLINE_THRESHOLD_MS = 2 * 60 * 1000;
 
 function parseInventoryReason(value: unknown): InventoryReason | null {
   const cleaned = sanitizeText(value, 40)
@@ -409,7 +410,7 @@ export async function adminRoutes(app: FastifyInstance) {
           item: { select: { id: true, name: true, sku: true } },
           performedBy: { select: { id: true, fullName: true, email: true } },
         },
-        orderBy: { occurredAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
         take: 100,
       }),
       prisma.deviceLog.findMany({
@@ -512,7 +513,7 @@ export async function adminRoutes(app: FastifyInstance) {
       })),
       prize_redemptions: prizeRedemptions.map((redemption) => ({
         id: redemption.id,
-        occurred_at: redemption.occurredAt.toISOString(),
+        occurred_at: redemption.createdAt.toISOString(),
         quantity: redemption.quantity,
         points_total: redemption.pointsTotal,
         item: {
@@ -1946,6 +1947,66 @@ export async function adminRoutes(app: FastifyInstance) {
         last_use_at: usage?.lastUseAt ?? null,
         total_uses_today: usage?.uses ?? 0,
         total_revenue_today: Number((usage?.revenue ?? 0).toFixed(2)),
+      };
+    }));
+  });
+
+  app.get('/admin/readers/status', { preHandler: [requireAuth, requireRole('supervisor')] }, async (req, reply) => {
+    const siteId = sanitizeUuid((req.query as any).site_id);
+    if (!siteId) return fail(reply, 'VALIDATION_ERROR', 'site_id requerido');
+
+    const offlineThreshold = new Date(Date.now() - READER_STATUS_OFFLINE_THRESHOLD_MS);
+    const readers = await prisma.reader.findMany({
+      where: { siteId },
+      include: {
+        attraction: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            status: true,
+            maintenanceMessage: true,
+          },
+        },
+      },
+      orderBy: [{ code: 'asc' }, { position: 'asc' }],
+    });
+
+    return ok(reply, readers.map((reader) => {
+      const isOnline = Boolean(reader.lastSeenAt && reader.lastSeenAt >= offlineThreshold);
+
+      let status = 'ONLINE';
+      let issue: string | null = null;
+
+      if (!reader.isActive) {
+        status = 'READER_INACTIVE';
+        issue = 'Lectora desactivada';
+      } else if (reader.attraction.status === 'MAINTENANCE') {
+        status = 'MACHINE_MAINTENANCE';
+        issue = reader.attraction.maintenanceMessage || 'Máquina en mantenimiento';
+      } else if (reader.attraction.status !== 'ACTIVE') {
+        status = 'MACHINE_INACTIVE';
+        issue = 'Máquina inactiva';
+      } else if (!isOnline) {
+        status = 'OFFLINE';
+        issue = 'Sin contacto reciente con el servidor';
+      }
+
+      return {
+        id: reader.id,
+        code: reader.code,
+        position: reader.position,
+        is_active: reader.isActive,
+        last_seen_at: reader.lastSeenAt?.toISOString() ?? null,
+        connected: status === 'ONLINE',
+        status,
+        issue,
+        attraction: {
+          id: reader.attraction.id,
+          code: reader.attraction.code,
+          name: reader.attraction.name,
+          status: reader.attraction.status,
+        },
       };
     }));
   });

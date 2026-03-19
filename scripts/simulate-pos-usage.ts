@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 import pino from 'pino';
 import { PrismaClient } from '@prisma/client';
-import { ApiClient, type ApiRequestResult, type AuthSession } from '../simulator/src/api.client.js';
+import { ApiClient, type ApiRequestResult, type AuthSession } from '../src/simulator/api.client.js';
 
 type Role = 'cashier' | 'supervisor' | 'admin';
 type PaymentMethod =
@@ -211,7 +211,7 @@ function parseArgs(argv: string[], defaultMode: 'smoke' | 'load' = 'smoke'): Cli
     baseUrl: (values.get('base-url') ?? process.env.SIM_BASE_URL ?? 'http://127.0.0.1:3001/api/v1').replace(/\/$/, ''),
     mode,
     durationMinutes: Math.max(1, getNumber('duration-minutes', mode === 'smoke' ? 2 : 3)),
-    cashiers: Math.max(1, Math.floor(getNumber('cashiers', mode === 'smoke' ? 1 : 2))),
+    cashiers: 1,
     salesPerMinute: Math.max(1, getNumber('sales-per-minute', mode === 'smoke' ? 6 : 18)),
     seed: Math.floor(getNumber('seed', 20260313)),
     rechargePct: clampPct(getNumber('recharge-pct', 25)),
@@ -323,18 +323,17 @@ async function loginAndDiscoverContext(
   }
 
   const users = await anonymousGet<User[]>(api, metrics, buildQuery('/auth/users', { site_id: site.id }));
-  const cashierUsers = users.filter((user) => user.role === 'cashier').slice(0, Math.max(1, options.cashiers));
+  const cashierUsers = users.filter((user) => user.role === 'cashier').slice(0, 1);
   const cashier = cashierUsers[0];
   const supervisor = users.find((user) => user.role === 'supervisor') ?? users.find((user) => user.role === 'admin');
   if (!cashier || !supervisor) {
-    throw new Error('Cashier or supervisor demo users are missing');
+    throw new Error('Admin, supervisor o cajero demo faltantes');
   }
 
   const pinByRole: Record<string, string> = {
     admin: '111111',
     supervisor: '222222',
-    'cajero1@poliverse.local': '333333',
-    'cajero2@poliverse.local': '444444',
+    'cajero@poliverse.local': '333333',
   };
 
   const cashierCandidates: CashierCandidate[] = [];

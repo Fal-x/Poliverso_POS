@@ -19,6 +19,19 @@ La lectora define:
 - `hmacSecret`: secreto compartido para firmar payloads.
 - `isActive`: habilita o bloquea la lectora.
 
+## 1.1. Pinout de pantalla TFT_ST7796
+
+Conexión operativa actual de la pantalla:
+
+- `VCC` -> `5V`
+- `GND` -> `GND`
+- `SCK` -> `P14`
+- `MOSI` -> `P13`
+- `CS` -> `P27`
+- `DC` -> `P26`
+- `RST` -> `P25`
+- `BL` -> `P32`
+
 ## 2. Seguridad requerida en la lectora
 
 Headers obligatorios en todas las llamadas ESP:
@@ -36,20 +49,112 @@ Reglas:
 - `x-signature` debe generarse con el `hmacSecret` de esa lectora.
 - En `POST /reader/validate`, el `timestamp` debe estar dentro de una ventana de 5 minutos.
 
-## 3. Flujo recomendado de conexión
+## 3. Flujo recomendado mínimo
+
+Modelo canónico simplificado:
 
 1. La lectora lee el UID NFC.
-2. La lectora llama `POST /reader/validate` o `POST /esp/activities/validate-and-use`.
-3. El servidor valida lectora, token, firma, ventana de tiempo y asociación lectora-máquina.
-4. El servidor revisa estado de máquina y tarjeta.
-5. Si todo está bien, debita saldo, crea ledger y registra `DeviceLog`.
-6. Si la máquina está en mantenimiento, responde bloqueo con mensaje operativo.
+2. La lectora llama una sola vez a `POST /esp/usage`.
+3. El servidor autentica la lectora por headers, toma la máquina asociada a esa lectora y registra el uso.
+4. El servidor actualiza `lastSeenAt` de la lectora en cada llamada válida.
+5. Administración o monitoreo consultan `GET /admin/readers/status?site_id=<uuid>` para saber si una lectora está online, offline o con problema operativo.
+
+Las rutas antiguas (`POST /reader/validate` y `POST /esp/activities/validate-and-use`) quedan por compatibilidad, pero la integración nueva debe usar solo `POST /esp/usage`.
 
 ## 4. Endpoints para lectoras
 
+### POST `/esp/usage`
+
+Uso: única llamada de la ESP para registrar una lectura válida y contar el uso del juego/máquina asociada a la lectora.
+
+Headers:
+- `x-reader-id`
+- `x-api-token`
+- `x-signature`
+
+Body mínimo:
+```json
+{
+  "uid": "04A1B2C3D4"
+}
+```
+
+Body recomendado si la lectora quiere idempotencia:
+```json
+{
+  "uid": "04A1B2C3D4",
+  "requestId": "11111111-1111-1111-1111-111111111111"
+}
+```
+
+Respuesta OK:
+```json
+{
+  "success": true,
+  "data": {
+    "allowed": true,
+    "reason": "OK",
+    "points_before": 0,
+    "points_after": 1000,
+    "credit_before": 20000,
+    "credit_after": 15000,
+    "transaction_id": "uuid",
+    "server_time": "2026-03-17T15:00:00.000Z"
+  }
+}
+```
+
+Bloqueo por mantenimiento:
+```json
+{
+  "success": true,
+  "data": {
+    "allowed": false,
+    "reason": "MACHINE_MAINTENANCE",
+    "message": "Máquina fuera de servicio por mantenimiento técnico."
+  }
+}
+```
+
+### GET `/admin/readers/status?site_id=<uuid>`
+
+Uso: endpoint para que el servidor, la UI o un monitor hagan polling y detecten si una lectora está conectada o presenta un problema.
+
+Respuesta:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "code": "ARCADE-01-R1",
+      "position": 1,
+      "is_active": true,
+      "last_seen_at": "2026-03-17T15:00:00.000Z",
+      "connected": true,
+      "status": "ONLINE",
+      "issue": null,
+      "attraction": {
+        "id": "uuid",
+        "code": "ARCADE-01",
+        "name": "Arcade 01",
+        "status": "ACTIVE"
+      }
+    }
+  ]
+}
+```
+
+Estados típicos:
+- `ONLINE`
+- `OFFLINE`
+- `READER_INACTIVE`
+- `MACHINE_MAINTENANCE`
+- `MACHINE_INACTIVE`
+
 ### POST `/reader/validate`
 
-Uso: flujo corto para validar un UID directamente contra la máquina asociada a la lectora.
+Uso: ruta legacy. Mantener solo mientras la ESP antigua migra al flujo único `POST /esp/usage`.
 
 Headers:
 - `x-reader-id`
@@ -138,7 +243,7 @@ Respuesta:
 
 ### POST `/esp/activities/validate-and-use`
 
-Uso: flujo completo donde la lectora informa explícitamente la máquina a usar.
+Uso: ruta legacy. Mantener solo para compatibilidad. Internamente puede operar igual que `POST /esp/usage` si no se envía `activityId`.
 
 Body:
 ```json

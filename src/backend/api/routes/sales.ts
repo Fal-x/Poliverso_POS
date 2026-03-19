@@ -9,43 +9,147 @@ import { assertReason, assertSupervisorApproval } from '@/backend/validation/cas
 import { syncExpectedCashAmount } from '@/backend/services/cashSessionService';
 import { sanitizeEmail, sanitizeId, sanitizeMoney, sanitizeText, sanitizeUuid } from '@/backend/utils/sanitize';
 
+function applyStreamCorsHeaders(reply: any, origin: string | undefined) {
+  if (!origin) return;
+  reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+  reply.raw.setHeader('Vary', 'Origin');
+}
+
+function extractCustomerAddress(notes?: string | null) {
+  return notes?.match(/direccion=([^;]+)/)?.[1] ?? '';
+}
+
+function extractCustomerPersonType(notes?: string | null) {
+  return notes?.match(/tipo_persona=([^;]+)/)?.[1] ?? 'natural';
+}
+
+function mapSaleSummary(s: {
+  id: string;
+  createdAt: Date;
+  subtotal: Prisma.Decimal;
+  total: Prisma.Decimal;
+  status: SaleStatus;
+  receiptNumber: string | null;
+  requiresElectronicInvoice: boolean;
+  customerId: string;
+  customer: {
+    id: string;
+    documentType: CustomerDocumentType;
+    documentNumber: string;
+    fullName: string;
+    phone: string;
+    email: string | null;
+    city: string;
+    notes: string | null;
+  };
+  createdBy: {
+    id: string;
+    fullName: string;
+  };
+  payments: Array<{ method: string }>;
+  lines: Array<{
+    id: string;
+    productId: string | null;
+    quantity: number;
+    unitPrice: Prisma.Decimal;
+    lineTotal: Prisma.Decimal;
+    category: string;
+    product: { name: string } | null;
+  }>;
+}) {
+  return {
+    id: s.id,
+    created_at: s.createdAt.toISOString(),
+    subtotal: s.subtotal.toFixed(2),
+    total: s.total.toFixed(2),
+    status: s.status,
+    payment_method: s.payments[0]?.method ?? null,
+    receipt_number: s.receiptNumber ?? null,
+    requires_invoice: s.requiresElectronicInvoice,
+    created_by: {
+      id: s.createdBy.id,
+      full_name: s.createdBy.fullName,
+    },
+    customer: s.customerId ? {
+      id: s.customer.id,
+      document_type: s.customer.documentType,
+      document_number: s.customer.documentNumber,
+      full_name: s.customer.fullName,
+      phone: s.customer.phone,
+      email: s.customer.email,
+      city: s.customer.city,
+      address: extractCustomerAddress(s.customer.notes),
+      person_type: extractCustomerPersonType(s.customer.notes),
+    } : null,
+    items: s.lines.map((l) => ({
+      id: l.id,
+      product_id: l.productId,
+      product_name: l.product?.name ?? 'Producto',
+      quantity: l.quantity,
+      unit_price: l.unitPrice.toFixed(2),
+      total: l.lineTotal.toFixed(2),
+      category: l.category,
+    })),
+  };
+}
+
 export async function salesRoutes(app: FastifyInstance) {
   app.get('/sales', { preHandler: [requireAuth, requireRole('supervisor')] }, async (req, reply) => {
     const siteId = (req.query as any).site_id as string;
-    const limit = parseInt(((req.query as any).limit as string) ?? '50', 10);
+    const limit = Math.min(parseInt(((req.query as any).limit as string) ?? '10', 10) || 10, 50);
+    const page = Math.max(parseInt(((req.query as any).page as string) ?? '1', 10) || 1, 1);
+    const rawFrom = ((req.query as any).from as string | undefined)?.trim() ?? '';
+    const rawTo = ((req.query as any).to as string | undefined)?.trim() ?? '';
+    const createdByUserId = sanitizeUuid((req.query as any).created_by_user_id as string);
     if (!siteId) return fail(reply, 'VALIDATION_ERROR', 'site_id requerido');
 
-    const sales = await prisma.sale.findMany({
-      where: { siteId },
-      include: { payments: true, lines: { include: { product: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: Math.min(limit, 200),
-    });
+    const from = rawFrom && /^\d{4}-\d{2}-\d{2}$/.test(rawFrom) ? new Date(`${rawFrom}T00:00:00`) : null;
+    const to = rawTo && /^\d{4}-\d{2}-\d{2}$/.test(rawTo) ? new Date(`${rawTo}T00:00:00`) : null;
+    if ((rawFrom && !from) || (rawTo && !to)) {
+      return fail(reply, 'VALIDATION_ERROR', 'from/to inválidos. Formato esperado: YYYY-MM-DD');
+    }
 
-    return ok(reply, sales.map(s => ({
-      id: s.id,
-      shift_id: s.shiftId,
-      user_id: s.createdById,
-      subtotal: s.subtotal.toFixed(2),
-      total: s.total.toFixed(2),
-      status: s.status,
-      created_at: s.createdAt.toISOString(),
-      payment_method: s.payments[0]?.method ?? null,
-      items: s.lines.map(l => ({
-        id: l.id,
-        product_id: l.productId,
-        product_name: l.product?.name ?? 'Producto',
-        quantity: l.quantity,
-        unit_price: l.unitPrice.toFixed(2),
-        total: l.lineTotal.toFixed(2),
-      })),
-    })));
+    const where: Prisma.SaleWhereInput = {
+      siteId,
+      ...(createdByUserId ? { createdById: createdByUserId } : {}),
+      ...((from || to) ? {
+        createdAt: {
+          ...(from ? { gte: from } : {}),
+          ...(to ? { lt: new Date(`${rawTo}T23:59:59.999`) } : {}),
+        },
+      } : {}),
+    };
+
+    const [total, sales] = await Promise.all([
+      prisma.sale.count({ where }),
+      prisma.sale.findMany({
+        where,
+        include: {
+          customer: true,
+          createdBy: true,
+          payments: true,
+          lines: { include: { product: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return ok(reply, {
+      items: sales.map(mapSaleSummary),
+      page,
+      page_size: limit,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+    });
   });
 
   app.get('/sales/recent', { preHandler: [requireAuth, requireRole('cashier')] }, async (req, reply) => {
     const siteId = (req.query as any).site_id as string;
     const createdByUserId = (req.query as any).created_by_user_id as string;
-    const limit = parseInt(((req.query as any).limit as string) ?? '15', 10);
+    const limit = Math.min(parseInt(((req.query as any).limit as string) ?? '10', 10) || 10, 50);
+    const page = Math.max(parseInt(((req.query as any).page as string) ?? '1', 10) || 1, 1);
     const rawSaleDate = ((req.query as any).sale_date as string | undefined)?.trim() ?? '';
     const authUser = (req as any).authUser as { id: string } | undefined;
 
@@ -64,52 +168,82 @@ export async function salesRoutes(app: FastifyInstance) {
       return fail(reply, 'VALIDATION_ERROR', 'sale_date inválida. Formato esperado: YYYY-MM-DD');
     }
 
-    const role = (req as any).authUser?.role as 'cashier' | 'supervisor' | 'admin' | undefined;
     const today = new Date();
     const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const effectiveSaleDate = role === 'cashier' ? todayDate : (rawSaleDate || todayDate);
+    const effectiveSaleDate = rawSaleDate || todayDate;
     const dateStart = new Date(`${effectiveSaleDate}T00:00:00`);
     const dateEnd = new Date(`${effectiveSaleDate}T00:00:00`);
     dateEnd.setDate(dateEnd.getDate() + 1);
 
-    const sales = await prisma.sale.findMany({
+    const where: Prisma.SaleWhereInput = {
+      siteId,
+      createdById: createdByUserId,
+      createdAt: {
+        gte: dateStart,
+        lt: dateEnd,
+      },
+    };
+
+    const [total, sales] = await Promise.all([
+      prisma.sale.count({ where }),
+      prisma.sale.findMany({
+        where,
+        include: {
+          customer: true,
+          createdBy: true,
+          payments: true,
+          lines: { include: { product: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return ok(reply, {
+      items: sales.map(mapSaleSummary),
+      page,
+      page_size: limit,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+    });
+  });
+
+  app.get('/sales/customer-lookup', { preHandler: [requireAuth, requireRole('cashier')] }, async (req, reply) => {
+    const siteId = sanitizeUuid((req.query as any).site_id as string);
+    const documentType = sanitizeText((req.query as any).document_type, 10).toUpperCase() as CustomerDocumentType;
+    const documentNumber = sanitizeText((req.query as any).document_number, 60);
+    const allowedTypes: CustomerDocumentType[] = ['CC', 'CE', 'NIT', 'PAS'];
+
+    if (!siteId || !documentNumber || !allowedTypes.includes(documentType)) {
+      return fail(reply, 'VALIDATION_ERROR', 'site_id, document_type y document_number válidos son requeridos');
+    }
+
+    const customer = await prisma.customer.findUnique({
       where: {
-        siteId,
-        createdById: createdByUserId,
-        createdAt: {
-          gte: dateStart,
-          lt: dateEnd,
+        siteId_documentType_documentNumber: {
+          siteId,
+          documentType,
+          documentNumber,
         },
       },
-      include: { payments: true, lines: { include: { product: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: Math.min(limit, 50),
     });
 
-    return ok(reply, sales.map(s => ({
-      id: s.id,
-      created_at: s.createdAt.toISOString(),
-      total: s.total.toFixed(2),
-      payment_method: s.payments[0]?.method ?? null,
-      requires_invoice: s.requiresElectronicInvoice,
-      customer: s.customerId ? {
-        id: s.customer.id,
-        document_type: s.customer.documentType,
-        document_number: s.customer.documentNumber,
-        full_name: s.customer.fullName,
-        phone: s.customer.phone,
-        email: s.customer.email,
-        city: s.customer.city,
-        address: s.customer.notes?.match(/direccion=([^;]+)/)?.[1] ?? '',
-        person_type: s.customer.notes?.match(/tipo_persona=([^;]+)/)?.[1] ?? 'natural',
-      } : null,
-      items: s.lines.map(l => ({
-        product_id: l.productId,
-        product_name: l.product?.name ?? 'Producto',
-        quantity: l.quantity,
-        unit_price: l.unitPrice.toFixed(2),
-      })),
-    })));
+    if (!customer) {
+      return fail(reply, 'NOT_FOUND', 'Cliente no encontrado', 404);
+    }
+
+    return ok(reply, {
+      id: customer.id,
+      document_type: customer.documentType,
+      document_number: customer.documentNumber,
+      full_name: customer.fullName,
+      phone: customer.phone,
+      email: customer.email,
+      city: customer.city,
+      address: customer.notes?.match(/direccion=([^;]+)/)?.[1] ?? '',
+      person_type: customer.notes?.match(/tipo_persona=([^;]+)/)?.[1] ?? 'natural',
+    });
   });
 
   app.patch('/sales/:id/metadata', { preHandler: [requireAuth, requireRole('cashier')] }, async (req, reply) => {
@@ -119,6 +253,8 @@ export async function salesRoutes(app: FastifyInstance) {
       managed_by_user_id: string;
       payment_method: string;
       requires_invoice: boolean;
+      total_amount?: string;
+      correction_reason?: string;
       customer?: {
         document_type: CustomerDocumentType | string;
         document_number: string;
@@ -135,6 +271,8 @@ export async function salesRoutes(app: FastifyInstance) {
     const managedByUserId = sanitizeUuid(body?.managed_by_user_id);
     const paymentMethod = sanitizeText(body?.payment_method, 20).toUpperCase();
     const requiresInvoice = Boolean(body?.requires_invoice);
+    const totalAmount = body?.total_amount ? sanitizeMoney(body.total_amount) : '';
+    const correctionReason = sanitizeText(body?.correction_reason, 240);
     const allowedPaymentMethods = new Set([
       'CASH',
       'TRANSFER',
@@ -166,6 +304,7 @@ export async function salesRoutes(app: FastifyInstance) {
       include: {
         customer: true,
         payments: true,
+        lines: true,
       },
     });
     if (!sale) return fail(reply, 'NOT_FOUND', 'Venta no encontrada', 404);
@@ -174,6 +313,26 @@ export async function salesRoutes(app: FastifyInstance) {
     }
     if (authUser?.role === 'cashier' && sale.createdById !== managedByUserId) {
       return fail(reply, 'FORBIDDEN', 'Solo puedes editar tus propias ventas', 403);
+    }
+
+    const shouldAdjustAmount = Boolean(totalAmount);
+    const nextTotalAmount = shouldAdjustAmount ? new Prisma.Decimal(totalAmount) : sale.total;
+    if (shouldAdjustAmount) {
+      if (authUser?.role === 'cashier') {
+        return fail(reply, 'FORBIDDEN', 'Solo supervisor o administrador pueden modificar valores', 403);
+      }
+      if (!correctionReason) {
+        return fail(reply, 'VALIDATION_ERROR', 'La corrección requiere una razón');
+      }
+      if (sale.lines.some((line) => line.category === 'RECHARGE')) {
+        return fail(reply, 'VALIDATION_ERROR', 'Las recargas deben anularse y volverse a registrar; no se corrigen por valor');
+      }
+      if (sale.lines.length !== 1 || sale.lines[0]?.quantity !== 1) {
+        return fail(reply, 'VALIDATION_ERROR', 'La corrección de valor solo está disponible para ventas de una sola línea y cantidad 1');
+      }
+      if (nextTotalAmount.lte(0)) {
+        return fail(reply, 'VALIDATION_ERROR', 'El nuevo valor debe ser mayor a cero');
+      }
     }
 
     let nextCustomerId = sale.customerId;
@@ -236,13 +395,56 @@ export async function salesRoutes(app: FastifyInstance) {
         data: {
           requiresElectronicInvoice: requiresInvoice,
           customerId: nextCustomerId,
+          ...(shouldAdjustAmount ? {
+            subtotal: nextTotalAmount,
+            total: nextTotalAmount,
+            totalPaid: nextTotalAmount,
+            balanceDue: new Prisma.Decimal(0),
+            tax: new Prisma.Decimal(0),
+            status: SaleStatus.PAID,
+          } : {}),
         },
       });
 
-      await tx.salePayment.updateMany({
+      const payments = await tx.salePayment.findMany({
         where: { saleId: sale.id },
-        data: { method: paymentMethod as any },
+        orderBy: { createdAt: 'asc' },
       });
+      const targetTotalCents = Math.round(nextTotalAmount.toNumber() * 100);
+      const originalCents = payments.map((payment) => Math.round(payment.amount.toNumber() * 100));
+      const originalSum = originalCents.reduce((sum, value) => sum + value, 0);
+      let assigned = 0;
+      for (let idx = 0; idx < payments.length; idx += 1) {
+        const payment = payments[idx];
+        let amountCents = originalCents[idx] ?? 0;
+        if (shouldAdjustAmount) {
+          if (payments.length === 1 || originalSum <= 0) {
+            amountCents = idx === 0 ? targetTotalCents : 0;
+          } else if (idx === payments.length - 1) {
+            amountCents = Math.max(0, targetTotalCents - assigned);
+          } else {
+            amountCents = Math.round((targetTotalCents * (originalCents[idx] ?? 0)) / originalSum);
+            assigned += amountCents;
+          }
+        }
+        await tx.salePayment.update({
+          where: { id: payment.id },
+          data: {
+            method: paymentMethod as any,
+            ...(shouldAdjustAmount ? { amount: new Prisma.Decimal((amountCents / 100).toFixed(2)) } : {}),
+          },
+        });
+      }
+
+      if (shouldAdjustAmount) {
+        await tx.saleLine.update({
+          where: { id: sale.lines[0].id },
+          data: {
+            unitPrice: nextTotalAmount,
+            lineTotal: nextTotalAmount,
+          },
+        });
+      }
 
       await tx.auditLog.create({
         data: {
@@ -255,12 +457,27 @@ export async function salesRoutes(app: FastifyInstance) {
             paymentMethod,
             requiresInvoice,
             customerId: nextCustomerId,
+            ...(shouldAdjustAmount ? { totalAmount: nextTotalAmount.toFixed(2) } : {}),
           },
+          reason: correctionReason || undefined,
         },
       });
 
-      return tx.sale.findUniqueOrThrow({
+      const refreshed = await tx.sale.findUniqueOrThrow({
         where: { id: sale.id },
+        include: {
+          site: { include: { organization: true } },
+          customer: true,
+          createdBy: true,
+          payments: true,
+          lines: { include: { product: true, card: true } },
+        },
+      });
+      const receiptNumber = refreshed.receiptNumber ?? `RC-${refreshed.createdAt.getTime().toString().slice(-8)}`;
+      const receiptText = buildReceiptTxt({ sale: refreshed as any });
+      return tx.sale.update({
+        where: { id: sale.id },
+        data: { receiptNumber, receiptText },
         include: {
           customer: true,
           payments: true,
@@ -280,8 +497,8 @@ export async function salesRoutes(app: FastifyInstance) {
         phone: updated.customer.phone,
         email: updated.customer.email,
         city: updated.customer.city,
-        address: updated.customer.notes?.match(/direccion=([^;]+)/)?.[1] ?? '',
-        person_type: updated.customer.notes?.match(/tipo_persona=([^;]+)/)?.[1] ?? 'natural',
+        address: extractCustomerAddress(updated.customer.notes),
+        person_type: extractCustomerPersonType(updated.customer.notes),
       },
     });
   });
@@ -318,6 +535,7 @@ export async function salesRoutes(app: FastifyInstance) {
 
     reply.hijack();
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    applyStreamCorsHeaders(reply, req.headers.origin);
     reply.raw.setHeader('Content-Type', 'application/pdf');
     reply.raw.setHeader('Content-Disposition', `attachment; filename="factura-${receiptNumber}.pdf"`);
     doc.pipe(reply.raw);
@@ -783,6 +1001,52 @@ export async function salesRoutes(app: FastifyInstance) {
       receipt_number: receiptNumber,
       receipt_text: receiptText,
     });
+  });
+
+  app.post('/sales/checkout-audit', { preHandler: [requireAuth, requireRole('cashier')] }, async (req, reply) => {
+    const body = req.body as {
+      site_id: string;
+      actor_id: string;
+      checkout_session_id: string;
+      event: 'OPEN' | 'UPDATE_ITEM' | 'REMOVE_ITEM' | 'CASH_TENDER' | 'SUBMIT';
+      item_id?: string;
+      before?: unknown;
+      after?: unknown;
+      reason?: string;
+    };
+
+    const siteId = sanitizeUuid(body?.site_id);
+    const actorId = sanitizeUuid(body?.actor_id);
+    const checkoutSessionId = sanitizeText(body?.checkout_session_id, 120);
+    const event = sanitizeText(body?.event, 20).toUpperCase();
+    const itemId = sanitizeText(body?.item_id, 120) || null;
+    const reason = sanitizeText(body?.reason, 240) || null;
+    const authUser = (req as any).authUser as { id: string } | undefined;
+
+    if (!siteId || !actorId || !checkoutSessionId || !event) {
+      return fail(reply, 'VALIDATION_ERROR', 'site_id, actor_id, checkout_session_id y event son requeridos');
+    }
+    if (authUser?.id && authUser.id !== actorId) {
+      return fail(reply, 'FORBIDDEN', 'Usuario no autorizado', 403);
+    }
+    if (!['OPEN', 'UPDATE_ITEM', 'REMOVE_ITEM', 'CASH_TENDER', 'SUBMIT'].includes(event)) {
+      return fail(reply, 'VALIDATION_ERROR', 'event inválido');
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        siteId,
+        actorId,
+        action: event === 'OPEN' ? 'OPEN' : event === 'REMOVE_ITEM' ? 'DELETE' : 'UPDATE',
+        entityType: 'SALE',
+        entityId: itemId ? `${checkoutSessionId}:${itemId}` : checkoutSessionId,
+        reason: reason ?? `CHECKOUT_${event}`,
+        before: (body?.before as Prisma.InputJsonValue | undefined) ?? undefined,
+        after: (body?.after as Prisma.InputJsonValue | undefined) ?? undefined,
+      },
+    });
+
+    return ok(reply, { logged: true });
   });
 
   app.post('/sales/:id/void', { preHandler: [requireAuth] }, async (req, reply) => {

@@ -249,27 +249,41 @@ async function main() {
     },
   });
 
-  const cashier1 = await prisma.user.upsert({
-    where: { email: "cajero1@poliverse.local" },
-    update: { status: UserStatus.ACTIVE, fullName: "Cajero 1" },
+  const cashier = await prisma.user.upsert({
+    where: { email: "cajero@poliverse.local" },
+    update: { status: UserStatus.ACTIVE, fullName: "Cajero" },
     create: {
-      email: "cajero1@poliverse.local",
-      fullName: "Cajero 1",
+      email: "cajero@poliverse.local",
+      fullName: "Cajero",
       passwordHash: await hash("Cajero123!"),
       status: UserStatus.ACTIVE,
     },
   });
 
-  const cashier2 = await prisma.user.upsert({
-    where: { email: "cajero2@poliverse.local" },
-    update: { status: UserStatus.ACTIVE, fullName: "Cajero 2" },
-    create: {
-      email: "cajero2@poliverse.local",
-      fullName: "Cajero 2",
-      passwordHash: await hash("Cajero123!"),
-      status: UserStatus.ACTIVE,
+  const legacyCashiers = await prisma.user.findMany({
+    where: {
+      email: { in: ["cajero1@poliverse.local", "cajero2@poliverse.local"] },
+      id: { not: cashier.id },
     },
+    select: { id: true },
   });
+
+  if (legacyCashiers.length > 0) {
+    await prisma.userAssignment.updateMany({
+      where: {
+        userId: { in: legacyCashiers.map((entry) => entry.id) },
+        siteId: site.id,
+      },
+      data: { isActive: false },
+    });
+    await prisma.user.updateMany({
+      where: { id: { in: legacyCashiers.map((entry) => entry.id) } },
+      data: { status: UserStatus.DISABLED },
+    });
+  }
+
+  const cashier1 = cashier;
+  const cashier2 = cashier;
 
   async function assign(userId: string, roleId: string) {
     await prisma.userAssignment.upsert({
@@ -281,8 +295,7 @@ async function main() {
 
   await assign(admin.id, roleAdmin.id);
   await assign(supervisor.id, roleSupervisor.id);
-  await assign(cashier1.id, roleCashier.id);
-  await assign(cashier2.id, roleCashier.id);
+  await assign(cashier.id, roleCashier.id);
 
   // 3.1) Auth codes (6 digits) - demo only
   async function setAuthCode(userId: string, code: string) {
@@ -311,8 +324,7 @@ async function main() {
 
   await setAuthCode(admin.id, "111111");
   await setAuthCode(supervisor.id, "222222");
-  await setAuthCode(cashier1.id, "333333");
-  await setAuthCode(cashier2.id, "444444");
+  await setAuthCode(cashier.id, "333333");
 
   // 4) Terminals + CashRegisters
   const terminalA = await prisma.terminal.upsert({
@@ -1961,7 +1973,7 @@ async function main() {
   console.log({
     organization: organization.name,
     site: site.name,
-    users: [admin.email, supervisor.email, cashier1.email, cashier2.email],
+    users: [admin.email, supervisor.email, cashier.email],
     shiftOpenId: shiftOpen.id,
     sampleCardUid: cards[0].uid,
     sampleSaleId: saleA.id,

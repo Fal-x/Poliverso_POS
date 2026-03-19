@@ -570,17 +570,23 @@ Eliminar escala.
 
 Estos endpoints están optimizados para dispositivos IoT.
 
-### POST /esp/read
-Lectura de tarjeta desde ESP.
+### POST /esp/usage
+Endpoint canónico simplificado para ESP. La lectora solo envía el UID leído y el servidor resuelve la máquina por la lectora autenticada.
 
-**Headers:** `X-Device-ID: ESP-001`
+**Headers:** `x-reader-id`, `x-api-token`, `x-signature`
 
-**Request:**
+**Request mínimo:**
 ```json
 {
-  "card_code": "POL-001234",
-  "machine_code": "AH-001",
-  "reader": 1
+  "uid": "04A1B2C3D4"
+}
+```
+
+**Request recomendado:**
+```json
+{
+  "uid": "04A1B2C3D4",
+  "requestId": "11111111-1111-1111-1111-111111111111"
 }
 ```
 
@@ -588,34 +594,19 @@ Lectura de tarjeta desde ESP.
 ```json
 {
   "success": true,
-  "action": "charge",
-  "amount": 3000,
-  "new_balance": 42000,
-  "display_message": "Saldo: $42,000"
+  "data": {
+    "allowed": true,
+    "reason": "OK",
+    "credit_before": 42000,
+    "credit_after": 39000,
+    "transaction_id": "uuid",
+    "server_time": "2026-03-17T15:00:00.000Z"
+  }
 }
 ```
 
-**Response 402 (saldo insuficiente):**
-```json
-{
-  "success": false,
-  "error": "insufficient_balance",
-  "display_message": "Saldo insuficiente"
-}
-```
-
-### POST /esp/heartbeat
-Ping de estado del dispositivo.
-
-**Request:**
-```json
-{
-  "device_id": "ESP-001",
-  "machine_code": "AH-001",
-  "status": "online",
-  "last_read_at": "2024-01-15T10:30:00Z"
-}
-```
+### GET /admin/readers/status?site_id=<uuid>
+Estado operativo de lectoras para polling desde servidor o UI.
 
 ---
 

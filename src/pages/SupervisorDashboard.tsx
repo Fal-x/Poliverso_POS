@@ -111,6 +111,20 @@ type InventoryResponse = {
   }>;
 };
 
+type TypeBreakdownResponse = {
+  metric: 'value' | 'count';
+  view: 'category' | 'subcategory';
+  selected_type: string | null;
+  total: number;
+  data: Array<{
+    name: string;
+    value: number;
+    count: number;
+    metric_value: number;
+    pct: number;
+  }>;
+};
+
 type StationRow = {
   id: string;
   code: string;
@@ -276,6 +290,7 @@ export default function SupervisorDashboard() {
   const [pending, setPending] = useState<PendingResponse | null>(null);
   const [inventory, setInventory] = useState<InventoryResponse | null>(null);
   const [stations, setStations] = useState<StationRow[]>([]);
+  const [typeBreakdown, setTypeBreakdown] = useState<TypeBreakdownResponse | null>(null);
   const [stationsLoading, setStationsLoading] = useState(false);
   const [maintenanceModalStation, setMaintenanceModalStation] = useState<StationRow | null>(null);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
@@ -335,12 +350,13 @@ export default function SupervisorDashboard() {
       movementParams.set('flow', movementFlow);
       if (movementCategory.trim()) movementParams.set('category', movementCategory.trim());
 
-      const [summaryResp, executiveResp, movementResp, pendingResp, inventoryResp, todayResp, weekResp, monthResp] = await Promise.all([
+      const [summaryResp, executiveResp, movementResp, pendingResp, inventoryResp, typeBreakdownResp, todayResp, weekResp, monthResp] = await Promise.all([
         api<SummaryResponse>(`/reports/dashboard/summary?${baseParams.toString()}&group_by=${dateParams.groupBy}`),
         api<ExecutiveResponse>(`/reports/admin/executive?site_id=${siteId}&area_m2=${areaM2}`),
         api<{ data: MovementRow[] }>(`/reports/dashboard/movements?${movementParams.toString()}`),
         api<PendingResponse>(`/reports/dashboard/pending?site_id=${siteId}`),
         api<InventoryResponse>(`/reports/dashboard/inventory?${baseParams.toString()}`),
+        api<TypeBreakdownResponse>(`/reports/day/type-breakdown?${baseParams.toString()}&metric=value`),
         api<SummaryResponse>(`/reports/dashboard/summary?site_id=${siteId}&from=${todayInput()}&to=${todayInput()}&group_by=day`),
         api<SummaryResponse>(`/reports/dashboard/summary?site_id=${siteId}&from=${dateShift(-6)}&to=${todayInput()}&group_by=day`),
         api<SummaryResponse>(`/reports/dashboard/summary?site_id=${siteId}&from=${dateShift(-29)}&to=${todayInput()}&group_by=day`),
@@ -351,6 +367,7 @@ export default function SupervisorDashboard() {
       setMovements(movementResp.data ?? []);
       setPending(pendingResp);
       setInventory(inventoryResp);
+      setTypeBreakdown(typeBreakdownResp);
       setPeriodKpis({
         today: todayResp.summary.total_sales,
         week: weekResp.summary.total_sales,
@@ -428,6 +445,17 @@ export default function SupervisorDashboard() {
       setError(err instanceof Error ? err.message : 'No se pudo generar el PDF del dashboard');
     } finally {
       setExportingPdf(false);
+    }
+  };
+
+  const exportDailyXls = async () => {
+    const siteId = getSiteIdStored();
+    if (!siteId) return;
+    try {
+      const { blob, filename } = await apiFile(`/reports/daily?site_id=${siteId}&format=xls`);
+      downloadBlob(blob, filename || `reporte-dia-${todayInput()}.xls`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'No se pudo generar el XLS diario');
     }
   };
 
@@ -521,6 +549,7 @@ export default function SupervisorDashboard() {
     return acc;
   }, { income: 0, expense: 0, adjustment: 0 });
   const movementCategories = Array.from(new Set(movements.map((row) => row.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'es'));
+  const salesTypeRows = typeBreakdown?.data.slice(0, 8) ?? [];
   const bentoItems = executive ? [
     {
       id: 'income-series',
@@ -735,6 +764,9 @@ export default function SupervisorDashboard() {
             <POSButton variant="secondary" fullWidth size="sm" icon={RefreshCw} onClick={() => loadDashboard().catch(() => null)}>
               {loading ? 'Actualizando...' : 'Actualizar'}
             </POSButton>
+            <POSButton variant="secondary" fullWidth size="sm" icon={Download} onClick={exportDailyXls}>
+              Descargar XLS diario
+            </POSButton>
             {authUser?.role === 'admin' && (
               <POSButton variant="secondary" fullWidth size="sm" icon={Download} onClick={exportDashboardPdf}>
                 {exportingPdf ? 'Generando PDF...' : 'Descargar PDF'}
@@ -788,6 +820,30 @@ export default function SupervisorDashboard() {
                   <p className="mt-2 text-sm text-muted-foreground">Retencion: {executive.customer_flow.retention_rate_pct.toFixed(1)}%</p>
                 </div>
               </div>
+
+              <section className="card-pos p-5">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Acumulado por tipo de producto</h2>
+                    <p className="text-sm text-muted-foreground">Ventas acumuladas por categoría para el periodo seleccionado.</p>
+                  </div>
+                  <span className="text-sm font-semibold">{formatCurrency(typeBreakdown?.total ?? 0)}</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {salesTypeRows.map((row) => (
+                    <div key={row.name} className="rounded-xl border border-border/60 bg-secondary/20 p-4">
+                      <p className="text-sm font-medium">{row.name}</p>
+                      <p className="mt-2 text-2xl font-bold">{formatCurrency(row.value)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{row.count} unidades • {row.pct.toFixed(1)}%</p>
+                    </div>
+                  ))}
+                  {salesTypeRows.length === 0 && (
+                    <div className="rounded-xl border border-border/60 bg-secondary/10 p-4 text-sm text-muted-foreground">
+                      Sin datos para el periodo seleccionado.
+                    </div>
+                  )}
+                </div>
+              </section>
 
               <MagicBento
                 items={bentoItems}

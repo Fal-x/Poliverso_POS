@@ -20,6 +20,7 @@
     "sim:pos:load": "tsx scripts/load-sales.ts",
     "sim:pos:period": "tsx scripts/simulate-pos-period.ts",
     "sim:pos:month": "tsx scripts/simulate-pos-period.ts --history-days=30",
+    "sim:esp:load": "node scripts/prueba-carga-lectoras.js",
     "api:dev": "tsx src/backend/api/server.ts",
     "api:start": "NODE_ENV=production tsx src/backend/api/server.ts"
   },
@@ -91,9 +92,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
-    "@testing-library/react": "^16.0.0",
     "@types/node": "^22.16.5",
     "@types/pdfkit": "^0.13.5",
     "@types/react": "^18.3.23",

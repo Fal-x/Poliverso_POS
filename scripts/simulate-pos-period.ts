@@ -220,7 +220,7 @@ function runEngine(options: PeriodOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.platform === 'win32' ? 'npx.cmd' : 'npx',
-      ['tsx', 'simulator/src/engine.ts'],
+      ['tsx', 'src/simulator/engine.ts'],
       {
         stdio: 'inherit',
         env: {

@@ -107,6 +107,12 @@ function csvEscape(value: string | number | null | undefined) {
   return raw;
 }
 
+function applyStreamCorsHeaders(reply: any, origin: string | undefined) {
+  if (!origin) return;
+  reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+  reply.raw.setHeader('Vary', 'Origin');
+}
+
 function normalizePaymentMethod(method: PaymentMethod) {
   if (method === 'TRANSFER') return 'TRANSFER_ACCOUNT_1';
   if (method === 'CARD') return 'CREDIT_CARD';
@@ -570,7 +576,9 @@ export async function reportRoutes(app: FastifyInstance) {
     const metric = sanitizeText((req.query as any).metric, 20).toLowerCase() === 'count' ? 'count' : 'value';
     const selectedType = sanitizeText((req.query as any).type, 80);
     if (!siteId) return fail(reply, 'VALIDATION_ERROR', 'site_id requerido');
-    const { start, end } = getBogotaDayRange();
+    const range = parseReportRange(req.query as Record<string, unknown>);
+    if (!range) return fail(reply, 'VALIDATION_ERROR', 'Rango de fechas inválido');
+    const { start, end } = range;
 
     const lines = await prisma.saleLine.findMany({
       where: {
@@ -1690,6 +1698,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
     reply.hijack();
     const doc = new PDFDocument({ margin: 34, size: 'A4' });
+    applyStreamCorsHeaders(reply, req.headers.origin);
     reply.raw.setHeader('Content-Type', 'application/pdf');
     reply.raw.setHeader('Content-Disposition', `attachment; filename="dashboard-arcade-${dateRangeLabel.replace(/\s+/g, '_')}.pdf"`);
     doc.pipe(reply.raw);
@@ -1830,6 +1839,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
   app.get('/reports/daily', { preHandler: [requireAuth, requireRole('supervisor')] }, async (req, reply) => {
     const siteId = sanitizeUuid((req.query as any).site_id);
+    const format = sanitizeText((req.query as any).format, 20).toLowerCase();
     if (!siteId) {
       reply.code(400).send({ success: false, error: { code: 'VALIDATION_ERROR', message: 'site_id requerido' } });
       return;
@@ -1848,8 +1858,65 @@ export async function reportRoutes(app: FastifyInstance) {
       take: 200,
     });
 
+    if (format === 'xls') {
+      const rows = sales.flatMap((sale) => (
+        sale.lines.map((line) => ({
+          saleId: sale.id.slice(0, 8),
+          createdAt: sale.createdAt.toLocaleString('es-CO'),
+          status: sale.status,
+          paymentMethod: sale.payments[0]?.method ?? 'N/A',
+          productName: line.product?.name ?? 'Producto',
+          category: resolveCategoryGroup({ category: line.category, product: line.product }),
+          quantity: line.quantity,
+          lineTotal: line.lineTotal.toFixed(2),
+          saleTotal: sale.total.toFixed(2),
+        }))
+      ));
+      const html = `
+        <html>
+          <head>
+            <meta charset="utf-8" />
+          </head>
+          <body>
+            <table border="1">
+              <tr>
+                <th>Venta</th>
+                <th>Fecha</th>
+                <th>Estado</th>
+                <th>Pago</th>
+                <th>Tipo</th>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Total linea</th>
+                <th>Total venta</th>
+              </tr>
+              ${rows.map((row) => `
+                <tr>
+                  <td>${row.saleId}</td>
+                  <td>${row.createdAt}</td>
+                  <td>${row.status}</td>
+                  <td>${row.paymentMethod}</td>
+                  <td>${row.category}</td>
+                  <td>${row.productName}</td>
+                  <td>${row.quantity}</td>
+                  <td>${row.lineTotal}</td>
+                  <td>${row.saleTotal}</td>
+                </tr>
+              `).join('')}
+            </table>
+          </body>
+        </html>
+      `;
+      reply
+        .type('application/vnd.ms-excel; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="reporte-dia-${start.toISOString().slice(0, 10)}.xls"`)
+        .send(html);
+      return;
+    }
+
     reply.hijack();
     const doc = new PDFDocument({ margin: 40 });
+    applyStreamCorsHeaders(reply, req.headers.origin);
     reply.raw.setHeader('Content-Type', 'application/pdf');
     reply.raw.setHeader('Content-Disposition', `attachment; filename="reporte-dia-${start.toISOString().slice(0, 10)}.pdf"`);
     doc.pipe(reply.raw);

@@ -118,7 +118,7 @@ async function verifyEspRequest(req: any, reply: any): Promise<EspContext | null
   }
 
   const reader = await prisma.reader.findFirst({
-    where: { code: readerCode, isActive: true, attraction: { status: 'ACTIVE' } },
+    where: { code: readerCode },
     include: { attraction: true },
   });
   if (!reader) {
@@ -476,17 +476,27 @@ export async function espRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post('/esp/activities/validate-and-use', async (req, reply) => {
+  const handleEspUsage = async (req: any, reply: any) => {
     const startedAt = Date.now();
     const ctx = await verifyEspRequest(req, reply);
     if (!ctx) return;
-    const body = req.body as { uid: string; activityId: string; terminalId: string; requestId: string };
-    if (!body?.uid || !body?.activityId || !body?.terminalId || !body?.requestId) {
-      return fail(reply, 'VALIDATION_ERROR', 'Campos requeridos incompletos');
+    const body = req.body as { uid?: string; activityId?: string; terminalId?: string; requestId?: string };
+    const uid = String(body?.uid ?? '').trim().toUpperCase();
+    const activityRef = String(body?.activityId ?? ctx.attractionId).trim();
+    const requestId = String(body?.requestId ?? '').trim() || crypto.randomUUID();
+    const normalizedPayload = {
+      uid,
+      activityId: activityRef,
+      terminalId: body?.terminalId ? String(body.terminalId).trim() : null,
+      requestId,
+    };
+
+    if (!uid) {
+      return fail(reply, 'VALIDATION_ERROR', 'uid requerido');
     }
 
     const existing = await prisma.deviceLog.findFirst({
-      where: { readerId: ctx.readerId, requestId: body.requestId },
+      where: { readerId: ctx.readerId, requestId },
     });
     if (existing) {
       return ok(reply, {
@@ -501,29 +511,29 @@ export async function espRoutes(app: FastifyInstance) {
       });
     }
 
-    const card = await prisma.card.findUnique({ where: { uid: body.uid } });
+    const card = await prisma.card.findFirst({ where: { uid, siteId: ctx.siteId } });
     if (!card) return fail(reply, 'NOT_FOUND', 'Tarjeta no encontrada', 404);
     if (card.status !== 'ACTIVE') {
       await prisma.deviceLog.create({
         data: {
           siteId: ctx.siteId,
           readerId: ctx.readerId,
-          uid: body.uid,
+          uid,
           cardId: card.id,
           activityId: null,
-          requestId: body.requestId,
+          requestId,
           eventType: 'VALIDATE',
           allowed: false,
           reason: 'CARD_BLOCKED',
           latency: Date.now() - startedAt,
-          payload: body as any,
+          payload: normalizedPayload as any,
         },
       });
       return ok(reply, { allowed: false, reason: 'CARD_BLOCKED' });
     }
 
     const attraction = await prisma.attraction.findFirst({
-      where: { OR: [{ id: body.activityId }, { code: body.activityId }], siteId: ctx.siteId },
+      where: { OR: [{ id: activityRef }, { code: activityRef }], siteId: ctx.siteId },
     });
     if (!attraction) return fail(reply, 'NOT_FOUND', 'Actividad no encontrada', 404);
     if (attraction.status === 'MAINTENANCE') {
@@ -531,16 +541,16 @@ export async function espRoutes(app: FastifyInstance) {
         data: {
           siteId: ctx.siteId,
           readerId: ctx.readerId,
-          uid: body.uid,
+          uid,
           cardId: card.id,
           activityId: attraction.id,
-          requestId: body.requestId,
+          requestId,
           eventType: 'VALIDATE',
           allowed: false,
           reason: 'MACHINE_MAINTENANCE',
           latency: Date.now() - startedAt,
           payload: {
-            ...body,
+            ...normalizedPayload,
             maintenanceMessage: attraction.maintenanceMessage || 'Máquina en mantenimiento',
           },
         },
@@ -556,33 +566,33 @@ export async function espRoutes(app: FastifyInstance) {
         data: {
           siteId: ctx.siteId,
           readerId: ctx.readerId,
-          uid: body.uid,
+          uid,
           cardId: card.id,
           activityId: attraction.id,
-          requestId: body.requestId,
+          requestId,
           eventType: 'VALIDATE',
           allowed: false,
           reason: 'MACHINE_INACTIVE',
           latency: Date.now() - startedAt,
-          payload: body as any,
+          payload: normalizedPayload as any,
         },
       });
       return ok(reply, { allowed: false, reason: 'MACHINE_INACTIVE' });
     }
-    if (attraction.id !== ctx.attractionId) {
+    if (body?.activityId && attraction.id !== ctx.attractionId) {
       await prisma.deviceLog.create({
         data: {
           siteId: ctx.siteId,
           readerId: ctx.readerId,
-          uid: body.uid,
+          uid,
           cardId: card.id,
           activityId: attraction.id,
-          requestId: body.requestId,
+          requestId,
           eventType: 'VALIDATE',
           allowed: false,
           reason: 'READER_MACHINE_MISMATCH',
           latency: Date.now() - startedAt,
-          payload: body as any,
+          payload: normalizedPayload as any,
         },
       });
       return ok(reply, { allowed: false, reason: 'READER_MACHINE_MISMATCH', message: 'Lectora no asociada a la máquina solicitada' });
@@ -608,15 +618,15 @@ export async function espRoutes(app: FastifyInstance) {
           data: {
             siteId: ctx.siteId,
             readerId: ctx.readerId,
-            uid: body.uid,
+            uid,
             cardId: card.id,
             activityId: attraction.id,
-            requestId: body.requestId,
+            requestId,
             eventType: 'VALIDATE',
             allowed: false,
             reason: 'CARD_BLOCKED',
             latency: Date.now() - startedAt,
-            payload: body as any,
+            payload: normalizedPayload as any,
           },
         });
         return {
@@ -697,25 +707,25 @@ export async function espRoutes(app: FastifyInstance) {
             updateCardBalances: false,
           });
 
-          await tx.deviceLog.create({
-            data: {
-              siteId: ctx.siteId,
-              readerId: ctx.readerId,
-              uid: body.uid,
-              cardId: card.id,
-              activityId: attraction.id,
-              requestId: body.requestId,
-              eventType: 'USE',
-              allowed: true,
-              reason: 'OK_POINTS',
-              latency: Date.now() - startedAt,
-              pointsBefore,
-              pointsAfter,
-              creditBefore,
-              creditAfter: creditBefore,
-              payload: body as any,
-            },
-          });
+        await tx.deviceLog.create({
+          data: {
+            siteId: ctx.siteId,
+            readerId: ctx.readerId,
+            uid,
+            cardId: card.id,
+            activityId: attraction.id,
+            requestId,
+            eventType: 'USE',
+            allowed: true,
+            reason: 'OK_POINTS',
+            latency: Date.now() - startedAt,
+            pointsBefore,
+            pointsAfter,
+            creditBefore,
+            creditAfter: creditBefore,
+            payload: normalizedPayload as any,
+          },
+        });
 
           return {
             allowed: true as const,
@@ -750,15 +760,15 @@ export async function espRoutes(app: FastifyInstance) {
             data: {
               siteId: ctx.siteId,
               readerId: ctx.readerId,
-              uid: body.uid,
+              uid,
               cardId: card.id,
               activityId: attraction.id,
-              requestId: body.requestId,
+              requestId,
               eventType: 'VALIDATE',
               allowed: false,
               reason: 'CARD_BLOCKED',
               latency: Date.now() - startedAt,
-              payload: body as any,
+              payload: normalizedPayload as any,
             },
           });
           return {
@@ -776,10 +786,10 @@ export async function espRoutes(app: FastifyInstance) {
           data: {
             siteId: ctx.siteId,
             readerId: ctx.readerId,
-            uid: body.uid,
+            uid,
             cardId: card.id,
             activityId: attraction.id,
-            requestId: body.requestId,
+            requestId,
             eventType: 'VALIDATE',
             allowed: false,
             reason: 'INSUFFICIENT_CREDIT',
@@ -788,7 +798,7 @@ export async function espRoutes(app: FastifyInstance) {
             pointsAfter: snapshot.pointsBalance,
             creditBefore: snapshot.creditBalance,
             creditAfter: snapshot.creditBalance,
-            payload: body as any,
+            payload: normalizedPayload as any,
           },
         });
         return {
@@ -871,10 +881,10 @@ export async function espRoutes(app: FastifyInstance) {
         data: {
           siteId: ctx.siteId,
           readerId: ctx.readerId,
-          uid: body.uid,
+          uid,
           cardId: card.id,
           activityId: attraction.id,
-          requestId: body.requestId,
+          requestId,
           eventType: 'USE',
           allowed: true,
           reason: 'OK',
@@ -883,7 +893,7 @@ export async function espRoutes(app: FastifyInstance) {
           pointsAfter,
           creditBefore,
           creditAfter,
-          payload: body as any,
+          payload: normalizedPayload as any,
         },
       });
 
@@ -908,5 +918,8 @@ export async function espRoutes(app: FastifyInstance) {
       transaction_id: result.transactionId,
       server_time: new Date().toISOString(),
     });
-  });
+  };
+
+  app.post('/esp/usage', handleEspUsage);
+  app.post('/esp/activities/validate-and-use', handleEspUsage);
 }

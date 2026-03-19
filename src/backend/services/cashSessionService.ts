@@ -211,12 +211,6 @@ export async function registerCashMovement(args: {
   assertPositiveAmount(args.amount);
   assertReason(args.reason);
 
-  await assertUserHasPermission({
-    userId: args.createdByUserId,
-    siteId: args.siteId,
-    permission: PermissionCode.CASH_WITHDRAWAL_CREATE,
-  });
-
   if (!args.approvalId) {
     throw new DomainError("El movimiento requiere autorización registrada.");
   }
@@ -224,6 +218,17 @@ export async function registerCashMovement(args: {
     approvalId: args.approvalId,
     siteId: args.siteId,
   });
+
+  // A cash withdrawal can be registered by a cashier when there is a valid
+  // supervisor/admin approval attached to the movement. Manual adjustments
+  // still require the operator to have the withdrawal permission directly.
+  if (args.type === CashMovementType.ADJUSTMENT) {
+    await assertUserHasPermission({
+      userId: args.createdByUserId,
+      siteId: args.siteId,
+      permission: PermissionCode.CASH_WITHDRAWAL_CREATE,
+    });
+  }
 
   return prisma.$transaction(async (tx) => {
     const session = await tx.cashSession.findFirst({

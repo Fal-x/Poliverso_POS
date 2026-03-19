@@ -8,7 +8,7 @@ export async function userRoutes(app: FastifyInstance) {
     const siteId = (req.query as any).site_id as string | undefined;
     if (!siteId) return fail(reply, 'VALIDATION_ERROR', 'site_id requerido');
     const assignments = await prisma.userAssignment.findMany({
-      where: { siteId, isActive: true },
+      where: { siteId, isActive: true, user: { status: 'ACTIVE' } },
       include: { user: true, role: true },
     });
     const data = assignments.map(a => ({
@@ -24,7 +24,7 @@ export async function userRoutes(app: FastifyInstance) {
     const siteId = (req.query as any).site_id as string | undefined;
     if (!siteId) return fail(reply, 'VALIDATION_ERROR', 'site_id requerido');
     const assignments = await prisma.userAssignment.findMany({
-      where: { siteId, isActive: true },
+      where: { siteId, isActive: true, user: { status: 'ACTIVE' } },
       include: { user: true, role: true },
     });
     const data = assignments.map(a => ({

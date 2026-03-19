@@ -4,13 +4,11 @@ import { POSLayout } from '@/layouts/POSLayout';
 import { POSButton } from '@/components/ui/POSButton';
 import { POSModal, ConfirmModal, ErrorModal, SyncModal } from '@/components/ui/POSModal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NumPad } from '@/components/ui/NumPad';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { 
-  CalendarDays,
   CreditCard, 
   RefreshCw, 
   Eye, 
@@ -52,6 +50,48 @@ type CheckoutEvent = 'GO_PAYMENT' | 'GO_CASH_TENDER' | 'GO_INVOICE' | 'PAYMENT_C
 type CardReadOptions = { openRecharge?: boolean; createIfMissing?: boolean; flowMode?: RechargeFlowMode };
 type PrizeCatalogItem = { id: string; name: string; sku: string | null; points_cost: number; stock: number };
 type PendingIssuedCard = { key: string; productId: string; productName: string; sequence: number; uid: string };
+type CardActivitySummary = {
+  card: Card;
+  summary: {
+    recharges_count: number;
+    uses_count: number;
+    redemptions_count: number;
+    last_activity_at: string | null;
+  };
+  recharges: Array<{
+    sale_id: string;
+    occurred_at: string;
+    receipt_number: string | null;
+    sale_status: string;
+    amount: string;
+    payments: Array<{ method: string; amount: string }>;
+    created_by: string;
+  }>;
+  usages: Array<{
+    id: string;
+    type: string;
+    cost: string;
+    occurred_at: string;
+    attraction: { id: string; code: string; name: string; type: string; location: string | null };
+    reader: { id: string; code: string; position: number };
+    performed_by: string | null;
+  }>;
+  prize_redemptions: Array<{
+    id: string;
+    occurred_at: string;
+    quantity: number;
+    points_total: number;
+    item: { id: string; name: string; sku: string | null };
+    performed_by: string;
+  }>;
+  balance_events: Array<{
+    id: string;
+    occurred_at: string;
+    money_delta: string;
+    points_delta: number;
+    reason: string;
+  }>;
+};
 type CashierDaySummary = {
   sales_today: string;
   daily_goal: string;
@@ -63,9 +103,16 @@ type CashierDaySummary = {
 type RecentSale = {
   id: string;
   created_at: string;
+  subtotal?: string;
   total: string;
+  status?: string;
   payment_method: string | null;
+  receipt_number?: string | null;
   requires_invoice?: boolean;
+  created_by?: {
+    id: string;
+    full_name: string;
+  } | null;
   customer?: {
     id: string;
     document_type: string;
@@ -77,7 +124,36 @@ type RecentSale = {
     address?: string;
     person_type?: string;
   } | null;
-  items: Array<{ product_id: string; product_name: string; quantity: number; unit_price: string }>;
+  items: Array<{ id?: string; product_id: string | null; product_name: string; quantity: number; unit_price: string; total?: string; category?: string }>;
+};
+
+type SalesHistoryResponse = {
+  items: RecentSale[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+};
+
+type KnownCustomerProfile = {
+  id: string;
+  document_type: string;
+  document_number: string;
+  full_name: string;
+  phone: string;
+  email?: string | null;
+  city: string;
+  address?: string;
+  person_type?: string;
+};
+
+type CheckoutAuditSnapshot = {
+  item_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
 };
 
 const PRODUCT_CATEGORY_THEMES: ProductCategoryTheme[] = [
@@ -136,6 +212,7 @@ export default function CashierDashboard() {
   const authUser = getAuthUser();
   const todayDate = toDateInputValue(new Date());
   const isCashierRole = authUser?.role === 'cashier';
+  const isSupervisorView = authUser?.role === 'supervisor' || authUser?.role === 'admin';
   const sanitizeTextInput = (value: string, maxLength = 120) => value.replace(/[\u0000-\u001F\u007F]/g, '').replace(/\s+/g, ' ').slice(0, maxLength);
   const sanitizeNumericInput = (value: string, maxLength = 10) => value.replace(/\D/g, '').slice(0, maxLength);
   const sanitizeCountInput = (value: string) => value.replace(/\D/g, '').slice(0, 4);
@@ -170,10 +247,12 @@ export default function CashierDashboard() {
   const [showCardReader, setShowCardReader] = useState(false);
   const [showRecharge, setShowRecharge] = useState(false);
   const [showCardInfo, setShowCardInfo] = useState(false);
+  const [cardInfoTab, setCardInfoTab] = useState('overview');
   const [showCardReadModal, setShowCardReadModal] = useState(false);
   const [pendingCardRead, setPendingCardRead] = useState<CardReadOptions | null>(null);
   const [showSaleCardScanModal, setShowSaleCardScanModal] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [checkoutAuditSessionId, setCheckoutAuditSessionId] = useState('');
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>('payment');
   const [showReceipt, setShowReceipt] = useState(false);
   const [showError, setShowError] = useState(false);
@@ -194,12 +273,12 @@ export default function CashierDashboard() {
   const [showCardTransferModal, setShowCardTransferModal] = useState(false);
   const [showRewardsModal, setShowRewardsModal] = useState(false);
   const [showRewardsRedeemConfirm, setShowRewardsRedeemConfirm] = useState(false);
-  const [salesHistoryDate, setSalesHistoryDate] = useState(todayDate);
-  const [salesHistoryCalendarOpen, setSalesHistoryCalendarOpen] = useState(false);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   
   // Estados de datos
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
+  const [currentCardActivity, setCurrentCardActivity] = useState<CardActivitySummary | null>(null);
+  const [isCurrentCardActivityLoading, setIsCurrentCardActivityLoading] = useState(false);
   const [cardUidInput, setCardUidInput] = useState('');
   const [pendingIssuedCards, setPendingIssuedCards] = useState<PendingIssuedCard[]>([]);
   const [currentIssuedCardIndex, setCurrentIssuedCardIndex] = useState(0);
@@ -252,8 +331,15 @@ export default function CashierDashboard() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>('cash');
   const [editingSale, setEditingSale] = useState<RecentSale | null>(null);
   const [editingSaleSaving, setEditingSaleSaving] = useState(false);
+  const [editingSaleTotalInput, setEditingSaleTotalInput] = useState('');
+  const [editingSaleReason, setEditingSaleReason] = useState('');
+  const [pendingPostSaleInvoice, setPendingPostSaleInvoice] = useState(false);
   const [cashReceivedInput, setCashReceivedInput] = useState('');
   const [recentSales, setRecentSales] = useState<RecentSale[]>([]);
+  const [salesHistoryPage, setSalesHistoryPage] = useState(1);
+  const [salesHistoryTotalPages, setSalesHistoryTotalPages] = useState(1);
+  const [salesHistoryTotal, setSalesHistoryTotal] = useState(0);
+  const [salesHistoryLoading, setSalesHistoryLoading] = useState(false);
   const [requiresInvoice, setRequiresInvoice] = useState(false);
   const [customerPersonType, setCustomerPersonType] = useState<'natural' | 'juridica'>('natural');
   const [customerDocType, setCustomerDocType] = useState<'CC' | 'CE' | 'NIT' | 'PAS'>('CC');
@@ -263,6 +349,8 @@ export default function CashierDashboard() {
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerCity, setCustomerCity] = useState('');
+  const [isCustomerLookupLoading, setIsCustomerLookupLoading] = useState(false);
+  const [customerLookupStatus, setCustomerLookupStatus] = useState<'found' | null>(null);
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [errorMessage, setErrorMessage] = useState('');
   const [receiptTotal, setReceiptTotal] = useState(0);
@@ -282,6 +370,116 @@ export default function CashierDashboard() {
     lastClosedAt: string | null;
   } | null>(null);
   const initialCashState = getCashState();
+
+  const writeCheckoutAudit = async (payload: {
+    event: 'OPEN' | 'UPDATE_ITEM' | 'REMOVE_ITEM' | 'CASH_TENDER' | 'SUBMIT';
+    itemId?: string;
+    before?: unknown;
+    after?: unknown;
+    reason?: string;
+    sessionId?: string;
+  }) => {
+    const siteId = getSiteIdStored();
+    const activeSessionId = payload.sessionId ?? checkoutAuditSessionId;
+    if (!siteId || !authUser?.id || !activeSessionId) return;
+    try {
+      await api('/sales/checkout-audit', {
+        method: 'POST',
+        body: JSON.stringify({
+          site_id: siteId,
+          actor_id: authUser.id,
+          checkout_session_id: activeSessionId,
+          event: payload.event,
+          item_id: payload.itemId,
+          before: payload.before,
+          after: payload.after,
+          reason: payload.reason,
+        }),
+      });
+    } catch {
+      // Audit logging must not block checkout UI.
+    }
+  };
+
+  const buildCheckoutAuditItemSnapshot = (item: CartItem | null | undefined): CheckoutAuditSnapshot | null => {
+    if (!item) return null;
+    return {
+      item_id: item.id,
+      product_id: item.productId,
+      product_name: item.productName,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      total: item.total,
+    };
+  };
+
+  const buildCheckoutAuditCartSnapshot = (items: CartItem[]) => ({
+    items: items.map((item) => buildCheckoutAuditItemSnapshot(item)).filter(Boolean),
+    total_quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+    total_amount: items.reduce((sum, item) => sum + item.total, 0),
+  });
+
+  const openCheckoutModal = () => {
+    if (!isOpen || cart.length === 0) return;
+    const sessionId = crypto.randomUUID();
+    setCheckoutAuditSessionId(sessionId);
+    setShowCheckout(true);
+    const cartSnapshot = buildCheckoutAuditCartSnapshot(cart);
+    void writeCheckoutAudit({
+      event: 'OPEN',
+      sessionId,
+      before: null,
+      after: cartSnapshot,
+      reason: 'CHECKOUT_OPEN',
+    });
+  };
+
+  const closeCheckoutModal = () => {
+    setShowCheckout(false);
+    setCheckoutAuditSessionId('');
+  };
+
+  const applyCashReceivedPreset = (amount: number) => {
+    const nextValue = String(amount);
+    if (showCheckout && checkoutAuditSessionId) {
+      void writeCheckoutAudit({
+        event: 'CASH_TENDER',
+        before: {
+          received_amount: cashReceivedValue,
+          change_due: changeDue,
+        },
+        after: {
+          received_amount: amount,
+          change_due: Math.max(0, amount - total),
+          source: 'preset',
+        },
+        reason: 'CHECKOUT_CASH_PRESET',
+      });
+    }
+    setCashReceivedInput(nextValue);
+  };
+
+  const loadCurrentCardActivity = async (uid: string) => {
+    const siteId = getSiteIdStored();
+    if (!siteId) return;
+    setIsCurrentCardActivityLoading(true);
+    try {
+      const summary = await api<CardActivitySummary>(`/cards/${encodeURIComponent(uid)}/activity-summary?site_id=${siteId}`);
+      setCurrentCardActivity(summary);
+    } catch (err: any) {
+      setCurrentCardActivity(null);
+      setErrorMessage(err?.message || 'No se pudo cargar la actividad de la tarjeta.');
+      setShowError(true);
+    } finally {
+      setIsCurrentCardActivityLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showCardInfo || showRecharge || !currentCard?.code) return;
+    setCardInfoTab('overview');
+    loadCurrentCardActivity(currentCard.code).catch(() => null);
+  }, [showCardInfo, showRecharge, currentCard?.code]);
   const [openingCashAmount, setOpeningCashAmount] = useState(initialCashState?.openingCashAmount ?? 0);
   const [cashSales, setCashSales] = useState(initialCashState?.cashSales ?? 0);
   const [cashWithdrawalsAmount, setCashWithdrawalsAmount] = useState(0);
@@ -308,7 +506,6 @@ export default function CashierDashboard() {
   const canProvideChange = selectedPayment !== 'cash' || cashReceivedValue >= total;
   const isCashCheckout = selectedPayment === 'cash';
   const canCashCheckout = !isCashCheckout || cashReceivedValue >= total;
-  const canProceedToInvoice = requiresInvoice && (!isCashCheckout || canProvideChange);
   const isCustomerComplete = Boolean(
     customerDocNumber.trim()
     && customerFullName.trim()
@@ -318,7 +515,10 @@ export default function CashierDashboard() {
     && customerCity.trim()
   );
   const isCardOwnerComplete = Boolean(cardOwnerDocNumber.trim() && cardOwnerFullName.trim());
-  const canSubmitCheckout = (!requiresInvoice || isCustomerComplete) && canCashCheckout;
+  const canSubmitCheckout = canCashCheckout;
+  const needsInvoiceStep = requiresInvoice;
+  const needsCashTenderStep = isCashCheckout;
+  const canAdvanceFromPayment = selectedPayment ? true : false;
 
   const normalizedProductSearchTerm = productSearchTerm.trim().toLowerCase();
   const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
@@ -550,6 +750,12 @@ export default function CashierDashboard() {
   }, [showCheckout, requiresInvoice, checkoutStep]);
 
   useEffect(() => {
+    if (showCheckout && cart.length === 0) {
+      closeCheckoutModal();
+    }
+  }, [showCheckout, cart.length]);
+
+  useEffect(() => {
     setCheckoutStep((prev) =>
       transitionCheckoutStep(prev, 'PAYMENT_CHANGED', {
         selectedPayment,
@@ -559,26 +765,96 @@ export default function CashierDashboard() {
     );
   }, [selectedPayment, requiresInvoice, canProvideChange]);
 
-  const refreshRecentSales = (siteId: string, saleDate?: string) => {
+  useEffect(() => {
+    const siteId = getSiteIdStored();
+    const documentNumber = customerDocNumber.trim();
+    if (!showCheckout || !requiresInvoice || !siteId || !documentNumber || documentNumber.length < 5) {
+      setIsCustomerLookupLoading(false);
+      setCustomerLookupStatus(null);
+      return;
+    }
+
+    const lookupKey = `${siteId}:${customerDocType}:${documentNumber}`;
+    let cancelled = false;
+    setIsCustomerLookupLoading(true);
+    setCustomerLookupStatus(null);
+
+    const timer = window.setTimeout(() => {
+      api<KnownCustomerProfile>(
+        `/sales/customer-lookup?site_id=${siteId}&document_type=${customerDocType}&document_number=${encodeURIComponent(documentNumber)}`
+      )
+        .then((customer) => {
+          if (cancelled) return;
+          const currentKey = `${siteId}:${customerDocType}:${customerDocNumber.trim()}`;
+          if (currentKey !== lookupKey) return;
+          setCustomerPersonType((customer.person_type ?? 'natural') === 'juridica' ? 'juridica' : 'natural');
+          setCustomerFullName(customer.full_name ?? '');
+          setCustomerPhone(customer.phone ?? '');
+          setCustomerEmail(customer.email ?? '');
+          setCustomerCity(customer.city ?? '');
+          setCustomerAddress(customer.address ?? '');
+          setCustomerLookupStatus('found');
+        })
+        .catch((err: any) => {
+          if (cancelled) return;
+          setCustomerLookupStatus(null);
+          const message = String(err?.message || '').toLowerCase();
+          if (!message.includes('cliente no encontrado') && !message.includes('[404]')) {
+            setErrorMessage(err?.message || 'No se pudo consultar el cliente.');
+            setShowError(true);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsCustomerLookupLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [showCheckout, requiresInvoice, customerDocType, customerDocNumber]);
+
+  const loadSalesHistory = async (siteId: string, page = salesHistoryPage) => {
     if (!authUser?.id) return;
-    const params = new URLSearchParams({
-      site_id: siteId,
-      created_by_user_id: authUser.id,
-      sale_date: isCashierRole ? todayDate : (saleDate || salesHistoryDate || todayDate),
-    });
-    api<typeof recentSales>(`/sales/recent?${params.toString()}`)
-      .then(setRecentSales)
-      .catch(() => setRecentSales([]));
+    setSalesHistoryLoading(true);
+    try {
+      const params = new URLSearchParams({
+        site_id: siteId,
+        limit: '10',
+        page: String(page),
+      });
+      let response: SalesHistoryResponse;
+      if (isCashierRole) {
+        params.set('created_by_user_id', authUser.id);
+        params.set('sale_date', todayDate);
+        response = await api<SalesHistoryResponse>(`/sales/recent?${params.toString()}`);
+      } else {
+        response = await api<SalesHistoryResponse>(`/sales?${params.toString()}`);
+      }
+      setRecentSales(response.items ?? []);
+      setSalesHistoryPage(response.page ?? page);
+      setSalesHistoryTotalPages(response.total_pages ?? 1);
+      setSalesHistoryTotal(response.total ?? 0);
+    } catch {
+      setRecentSales([]);
+      setSalesHistoryTotalPages(1);
+      setSalesHistoryTotal(0);
+    } finally {
+      setSalesHistoryLoading(false);
+    }
   };
 
   useEffect(() => {
     const siteId = getSiteIdStored();
     if (!siteId || !authUser?.id) return;
     const interval = window.setInterval(() => {
-      refreshRecentSales(siteId, salesHistoryDate);
+      if (showSalesHistory) {
+        loadSalesHistory(siteId, salesHistoryPage).catch(() => null);
+      }
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [authUser?.id, salesHistoryDate, isCashierRole, todayDate]);
+  }, [authUser?.id, isCashierRole, todayDate, showSalesHistory, salesHistoryPage]);
 
   useEffect(() => {
     const siteId = getSiteIdStored();
@@ -765,14 +1041,38 @@ export default function CashierDashboard() {
 
   // Actualizar cantidad
   const updateQuantity = (itemId: string, delta: number) => {
-    setCart(prev => prev.map(item => {
-      if (item.id === itemId) {
-        const newQty = Math.max(0, item.quantity + delta);
-        if (newQty === 0) return null as unknown as CartItem;
-        return { ...item, quantity: newQty, total: newQty * item.unitPrice };
+    setCart(prev => {
+      const target = prev.find((item) => item.id === itemId);
+      if (!target) return prev;
+
+      const newQty = Math.max(0, target.quantity + delta);
+      const nextCart = prev
+        .map((item) => {
+          if (item.id !== itemId) return item;
+          if (newQty === 0) return null as unknown as CartItem;
+          return { ...item, quantity: newQty, total: newQty * item.unitPrice };
+        })
+        .filter(Boolean);
+
+      if (showCheckout && checkoutAuditSessionId) {
+        const updated = newQty === 0 ? null : nextCart.find((item) => item.id === itemId);
+        void writeCheckoutAudit({
+          event: newQty === 0 ? 'REMOVE_ITEM' : 'UPDATE_ITEM',
+          itemId,
+          before: {
+            item: buildCheckoutAuditItemSnapshot(target),
+            cart: buildCheckoutAuditCartSnapshot(prev),
+          },
+          after: {
+            item: buildCheckoutAuditItemSnapshot(updated),
+            cart: buildCheckoutAuditCartSnapshot(nextCart),
+          },
+          reason: newQty === 0 ? 'CHECKOUT_REMOVE_ITEM' : 'CHECKOUT_UPDATE_ITEM',
+        });
       }
-      return item;
-    }).filter(Boolean));
+
+      return nextCart;
+    });
   };
 
   const openCardReadModal = (options?: CardReadOptions) => {
@@ -795,28 +1095,69 @@ export default function CashierDashboard() {
   };
 
   // Lectura de tarjeta por API
-  const handleReadCard = (uidOverride?: string) => {
+  const closeSyncWithError = (message: string) => {
+    setSyncStatus('error');
+    setSyncMessage(undefined);
+    setTimeout(() => {
+      setShowSync(false);
+      setErrorMessage(message);
+      setShowError(true);
+    }, 250);
+  };
+
+  const handleReadCard = async (uidOverride?: string) => {
     const siteId = getSiteIdStored();
     if (!siteId) {
+      setShowSync(false);
       setErrorMessage('No se encontró la sede');
       setShowError(true);
       return;
     }
     if (!pendingCardRead) {
+      setShowSync(false);
       setErrorMessage('No se encontró el contexto de lectura');
       setShowError(true);
       return;
     }
     const uid = sanitizeTextInput((uidOverride ?? cardUidInput).toUpperCase(), 60).replace(/\s+/g, '');
     if (!uid) {
+      setShowSync(false);
       setErrorMessage('Debes ingresar el UID de la tarjeta');
       setShowError(true);
       return;
     }
-    if (pendingCardRead.createIfMissing && registerCardOwner && !isCardOwnerComplete) {
-      setErrorMessage('Completa documento y nombre del propietario');
-      setShowError(true);
-      return;
+
+    if (pendingCardRead.createIfMissing) {
+      try {
+        const existingCard = await checkIssuedCardUidAvailability(siteId, uid);
+        if (existingCard) {
+          setCurrentCard(existingCard);
+          setRechargeFlowMode('recharge_only');
+          setShowCardReadModal(false);
+          setSyncStatus('success');
+          setSyncMessage(undefined);
+          setTimeout(() => {
+            setShowSync(false);
+            setErrorMessage(
+              `La tarjeta ${uid} ya existe. Se cargó como tarjeta existente y no se emitirá una nueva con ese UID.`
+            );
+            setShowError(true);
+            if (pendingCardRead.openRecharge) {
+              setShowCardInfo(false);
+              setShowRecharge(true);
+            } else {
+              setShowCardInfo(true);
+            }
+          }, 250);
+          setPendingCardRead(null);
+          return;
+        }
+      } catch (err: any) {
+        closeSyncWithError(err?.message || 'No se pudo validar si la tarjeta ya existe.');
+        setPendingCardRead(null);
+        return;
+      }
+
     }
 
     setShowSync(true);
@@ -859,13 +1200,7 @@ export default function CashierDashboard() {
         }, 400);
       })
       .catch((err) => {
-        setSyncStatus('error');
-        setSyncMessage(undefined);
-        setTimeout(() => {
-          setShowSync(false);
-          setErrorMessage(err?.message || 'No se pudo leer la tarjeta');
-          setShowError(true);
-        }, 400);
+        closeSyncWithError(err?.message || 'No se pudo leer la tarjeta');
       })
       .finally(() => {
         setPendingCardRead(null);
@@ -891,7 +1226,7 @@ export default function CashierDashboard() {
         if (response.uid) {
           if (target === 'card_read') {
             setCardUidInput(response.uid);
-            handleReadCard(response.uid);
+            await handleReadCard(response.uid);
             return;
           }
           if (target === 'sale_card_issue') {
@@ -941,6 +1276,11 @@ export default function CashierDashboard() {
     }
     if (!currentCard) {
       setErrorMessage('No hay tarjeta seleccionada');
+      setShowError(true);
+      return;
+    }
+    if (rechargeFlowMode === 'issue_and_recharge' && registerCardOwner && !isCardOwnerComplete) {
+      setErrorMessage('Activas­te registrar propietario, pero falta documento o nombre. Complétalos antes de cargar la tarjeta.');
       setShowError(true);
       return;
     }
@@ -1033,8 +1373,27 @@ export default function CashierDashboard() {
     finalizeCheckout(issuedCards.map((entry) => ({ product_id: entry.productId, uid: entry.uid })));
   };
 
-  const registerIssuedCardUid = (uidOverride?: string) => {
+  const checkIssuedCardUidAvailability = async (siteId: string, uid: string) => {
+    try {
+      const existingCard = await api<Card>(`/cards/${encodeURIComponent(uid)}?site_id=${siteId}`);
+      return existingCard;
+    } catch (err: any) {
+      const message = String(err?.message || '');
+      if (message.toLowerCase().includes('tarjeta no encontrada')) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const registerIssuedCardUid = async (uidOverride?: string) => {
+    const siteId = getSiteIdStored();
     const uid = sanitizeTextInput((uidOverride ?? cardUidInput).toUpperCase(), 60).replace(/\s+/g, '');
+    if (!siteId) {
+      setErrorMessage('No se encontró la sede');
+      setShowError(true);
+      return;
+    }
     if (!uid) {
       setErrorMessage('Debes escanear o ingresar el UID de la tarjeta');
       setShowError(true);
@@ -1042,6 +1401,21 @@ export default function CashierDashboard() {
     }
     if (pendingIssuedCards.some((entry, index) => index !== currentIssuedCardIndex && entry.uid === uid)) {
       setErrorMessage('Ese UID ya fue leído para otra tarjeta de esta venta.');
+      setShowError(true);
+      return;
+    }
+
+    try {
+      const existingCard = await checkIssuedCardUidAvailability(siteId, uid);
+      if (existingCard) {
+        setErrorMessage(
+          `La tarjeta ${uid} ya existe y no puede emitirse de nuevo. Usa otra tarjeta o cambia al flujo de lectura/recarga.`
+        );
+        setShowError(true);
+        return;
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'No se pudo validar si la tarjeta ya existe.');
       setShowError(true);
       return;
     }
@@ -1082,9 +1456,45 @@ export default function CashierDashboard() {
     }
     if (cart.length === 0) return;
 
-    setShowCheckout(false);
+    if (checkoutAuditSessionId) {
+      if (selectedPayment === 'cash') {
+        void writeCheckoutAudit({
+          event: 'CASH_TENDER',
+          before: {
+            received_amount: cashReceivedValue,
+            change_due: changeDue,
+          },
+          after: {
+            received_amount: cashReceivedValue,
+            change_due: changeDue,
+            sufficient: canCashCheckout,
+          },
+          reason: 'CHECKOUT_CASH_CONFIRMED',
+        });
+      }
+
+      void writeCheckoutAudit({
+        event: 'SUBMIT',
+        before: {
+          cart: buildCheckoutAuditCartSnapshot(cart),
+        },
+        after: {
+          payment_method: selectedPayment,
+          total,
+          requires_invoice: requiresInvoice,
+          cash_received: selectedPayment === 'cash' ? cashReceivedValue : null,
+          change_due: selectedPayment === 'cash' ? changeDue : null,
+          issued_cards_count: issuedCards.length,
+        },
+        reason: 'CHECKOUT_SUBMIT',
+      });
+    }
+
+    closeCheckoutModal();
     setShowSync(true);
     setSyncStatus('syncing');
+
+    const invoiceReadyAtSaleTime = requiresInvoice && isCustomerComplete;
 
     const createSale = () => api<{ id: string; total: string; receipt_number?: string | null; receipt_text?: string | null }>('/sales', {
       method: 'POST',
@@ -1094,8 +1504,8 @@ export default function CashierDashboard() {
         terminal_id: posContext.terminalId,
         cash_session_id: posContext.cashSessionId,
         created_by_user_id: authUser.id,
-        requires_invoice: requiresInvoice,
-        customer: customerDocNumber.trim()
+        requires_invoice: invoiceReadyAtSaleTime,
+        customer: invoiceReadyAtSaleTime && customerDocNumber.trim()
           ? {
               document_type: customerDocType,
               document_number: customerDocNumber.trim(),
@@ -1128,10 +1538,29 @@ export default function CashierDashboard() {
         setCart([]);
         setCashReceivedInput('');
         if (siteId) {
-          refreshRecentSales(siteId);
+          loadSalesHistory(siteId, 1).catch(() => null);
           refreshDaySummary(siteId).catch(() => null);
         }
         refreshCashSessionSummary(posContext.cashSessionId).catch(() => null);
+        if (requiresInvoice && !invoiceReadyAtSaleTime && saleResult?.id) {
+          setPendingPostSaleInvoice(true);
+          setEditingSale({
+            id: saleResult.id,
+            created_at: new Date().toISOString(),
+            total: total.toFixed(2),
+            payment_method: resolvePaymentMethod(selectedPayment),
+            requires_invoice: true,
+            customer: null,
+            items: cart.map((item) => ({
+              product_id: item.productId,
+              product_name: item.productName,
+              quantity: item.quantity,
+              unit_price: item.unitPrice.toFixed(2),
+            })),
+          });
+          setShowEditSaleModal(true);
+          return;
+        }
         setShowReceipt(true);
       }, 500);
     };
@@ -1142,7 +1571,13 @@ export default function CashierDashboard() {
         setSyncStatus('error');
         setTimeout(() => {
           setShowSync(false);
-          setErrorMessage(err?.message || 'No se pudo registrar la venta');
+          const message = String(err?.message || '');
+          if (message.toLowerCase().includes('uid ya registrado')) {
+            setShowSaleCardScanModal(true);
+            setErrorMessage(`${message}. Escanea una tarjeta nueva para continuar la emisión.`);
+          } else {
+            setErrorMessage(message || 'No se pudo registrar la venta');
+          }
           setShowError(true);
         }, 400);
       });
@@ -1164,16 +1599,48 @@ export default function CashierDashboard() {
         return;
       }
     }
-    if (requiresInvoice && !isCustomerComplete) {
-      setErrorMessage('Completa los datos del cliente para facturar.');
-      setShowError(true);
-      return;
-    }
     if (requiredIssuedCards.length > 0) {
       startSaleCardScanFlow();
       return;
     }
     finalizeCheckout();
+  };
+
+  const continueCheckoutFlow = () => {
+    if (checkoutStep === 'payment') {
+      if (!canAdvanceFromPayment) return;
+      if (needsInvoiceStep) {
+        setCheckoutStep('invoice');
+        return;
+      }
+      if (needsCashTenderStep) {
+        setCheckoutStep('cash_tender');
+        return;
+      }
+      handleCheckout();
+      return;
+    }
+
+    if (checkoutStep === 'invoice') {
+      if (needsCashTenderStep) {
+        setCheckoutStep('cash_tender');
+        return;
+      }
+      handleCheckout();
+      return;
+    }
+
+    handleCheckout();
+  };
+
+  const goBackCheckoutFlow = () => {
+    if (checkoutStep === 'cash_tender') {
+      setCheckoutStep(needsInvoiceStep ? 'invoice' : 'payment');
+      return;
+    }
+    if (checkoutStep === 'invoice') {
+      setCheckoutStep('payment');
+    }
   };
 
   const handlePrintReceiptPdf = async () => {
@@ -1677,6 +2144,8 @@ export default function CashierDashboard() {
   const openSaleEditor = (sale: RecentSale) => {
     setEditingSale(sale);
     setSelectedPayment(resolveUiPayment(sale.payment_method));
+    setEditingSaleTotalInput(sale.total);
+    setEditingSaleReason('');
     setRequiresInvoice(Boolean(sale.requires_invoice));
     setCustomerPersonType((sale.customer?.person_type ?? 'natural') === 'juridica' ? 'juridica' : 'natural');
     setCustomerDocType((sale.customer?.document_type as typeof customerDocType) ?? 'CC');
@@ -1701,6 +2170,13 @@ export default function CashierDashboard() {
       setShowError(true);
       return;
     }
+    const normalizedTotal = editingSaleTotalInput.replace(/[^\d.]/g, '');
+    const wantsAmountEdit = isSupervisorView && normalizedTotal && Number(normalizedTotal) !== Number(editingSale.total);
+    if (wantsAmountEdit && !editingSaleReason.trim()) {
+      setErrorMessage('Debes indicar la razón de la corrección.');
+      setShowError(true);
+      return;
+    }
 
     try {
       setEditingSaleSaving(true);
@@ -1711,6 +2187,8 @@ export default function CashierDashboard() {
           managed_by_user_id: authUser.id,
           payment_method: resolvePaymentMethod(selectedPayment),
           requires_invoice: requiresInvoice,
+          total_amount: wantsAmountEdit ? normalizedTotal : undefined,
+          correction_reason: wantsAmountEdit ? editingSaleReason.trim() : undefined,
           customer: requiresInvoice ? {
             document_type: customerDocType,
             document_number: customerDocNumber.trim(),
@@ -1723,11 +2201,77 @@ export default function CashierDashboard() {
           } : undefined,
         }),
       });
-      await refreshRecentSales(siteId, salesHistoryDate);
+      await loadSalesHistory(siteId, salesHistoryPage);
       setShowEditSaleModal(false);
       setEditingSale(null);
+      setEditingSaleTotalInput('');
+      setEditingSaleReason('');
+      if (pendingPostSaleInvoice) {
+        setPendingPostSaleInvoice(false);
+        setShowReceipt(true);
+      }
     } catch (err: any) {
       setErrorMessage(err?.message || 'No se pudo actualizar la venta.');
+      setShowError(true);
+    } finally {
+      setEditingSaleSaving(false);
+    }
+  };
+
+  const handleReprintSale = async (sale?: RecentSale | null) => {
+    const targetSale = sale ?? editingSale;
+    const siteId = getSiteIdStored();
+    if (!siteId || !targetSale?.id) {
+      setErrorMessage('No se encontró la venta para reimprimir.');
+      setShowError(true);
+      return;
+    }
+    try {
+      const { blob, filename } = await apiFile(`/sales/${targetSale.id}/receipt.pdf?site_id=${siteId}`);
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename || `factura-${targetSale.receipt_number || targetSale.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'No se pudo reimprimir la venta.');
+      setShowError(true);
+    }
+  };
+
+  const handleVoidSale = async (sale: RecentSale) => {
+    const siteId = getSiteIdStored();
+    if (!siteId || !authUser?.id) {
+      setErrorMessage('No se encontró contexto para anular la venta.');
+      setShowError(true);
+      return;
+    }
+    const reason = editingSaleReason.trim();
+    if (!reason) {
+      setErrorMessage('Debes indicar la razón de anulación o corrección.');
+      setShowError(true);
+      return;
+    }
+    try {
+      setEditingSaleSaving(true);
+      await api(`/sales/${sale.id}/void`, {
+        method: 'POST',
+        body: JSON.stringify({
+          site_id: siteId,
+          voided_by_user_id: authUser.id,
+          reason,
+        }),
+      });
+      await loadSalesHistory(siteId, salesHistoryPage);
+      setShowEditSaleModal(false);
+      setEditingSale(null);
+      setEditingSaleTotalInput('');
+      setEditingSaleReason('');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'No se pudo anular la venta.');
       setShowError(true);
     } finally {
       setEditingSaleSaving(false);
@@ -1866,7 +2410,7 @@ export default function CashierDashboard() {
       }))
       .catch(() => setSiteConfig(null));
 
-    refreshRecentSales(siteId, salesHistoryDate);
+    loadSalesHistory(siteId, 1).catch(() => null);
     refreshDaySummary(siteId).catch(() => null);
     loadPrizeCatalog().catch(() => setPrizeCatalog([]));
   }, []);
@@ -1921,6 +2465,18 @@ export default function CashierDashboard() {
         value={cashReceivedInput}
         onChange={(e) => setCashReceivedInput(sanitizeNumericInput(e.target.value, 7))}
       />
+      <div className="grid grid-cols-3 gap-2">
+        {[20000, 50000, 100000].map((amount) => (
+          <button
+            key={amount}
+            type="button"
+            className="rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-sm font-medium transition hover:bg-secondary"
+            onClick={() => applyCashReceivedPreset(amount)}
+          >
+            {formatCurrency(amount)}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div className="rounded-lg bg-secondary/60 p-2">
           <p className="text-muted-foreground">Recibido</p>
@@ -2101,8 +2657,8 @@ export default function CashierDashboard() {
               size="sm"
               onClick={() => {
                 const siteId = getSiteIdStored();
-                const targetDate = isCashierRole ? todayDate : salesHistoryDate;
-                if (siteId) refreshRecentSales(siteId, targetDate);
+                setSalesHistoryPage(1);
+                if (siteId) loadSalesHistory(siteId, 1).catch(() => null);
                 setShowSalesHistory(true);
               }}
             >
@@ -2484,7 +3040,7 @@ export default function CashierDashboard() {
                   size="md"
                   fullWidth
                   disabled={!isOpen || cart.length === 0}
-                  onClick={() => setShowCheckout(true)}
+                  onClick={openCheckoutModal}
                 >
                   Cobrar
                 </POSButton>
@@ -2535,11 +3091,11 @@ export default function CashierDashboard() {
 
           <div className="flex items-stretch gap-2 rounded-full border border-border/70 bg-background/84 px-3 py-1.5 shadow-lg backdrop-blur">
             <div className="min-w-[170px] rounded-full bg-card/80 px-4 py-1.5">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Saldo actual</p>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Saldo en caja</p>
               <p className="mt-0.5 text-sm font-bold">{formatCurrency(dayCashBalanceValue)}</p>
             </div>
             <div className="min-w-[170px] rounded-full bg-card/80 px-4 py-1.5">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Saldo total</p>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Total día</p>
               <p className="mt-0.5 text-sm font-bold">{formatCurrency(daySalesValue)}</p>
             </div>
             <div className="min-w-[300px] rounded-full bg-card/80 px-4 py-1.5">
@@ -2674,47 +3230,221 @@ export default function CashierDashboard() {
       {/* Modal Lectura de Tarjeta / Info */}
       <POSModal
         isOpen={showCardInfo && !showRecharge}
-        onClose={() => { setShowCardInfo(false); setCurrentCard(null); }}
+        onClose={() => { setShowCardInfo(false); setCurrentCard(null); setCurrentCardActivity(null); }}
         title="Información de Tarjeta"
-        size="md"
+        size="xl"
+        contentClassName="max-w-[96vw] lg:max-w-[1100px]"
       >
         {currentCard && (
-          <div className="space-y-6">
-            <div className="text-center p-6 bg-secondary rounded-xl">
-              <p className="text-sm text-muted-foreground mb-2">Código de Tarjeta</p>
-              <p className="text-2xl font-mono font-bold text-primary">{currentCard.code}</p>
-              {currentCard.label && (
-                <p className="mt-2 text-sm font-medium text-foreground">{currentCard.label}</p>
-              )}
+          <div className="space-y-5">
+            <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr]">
+              <div className="rounded-2xl border border-border/60 bg-secondary/35 p-5">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Tarjeta activa</p>
+                <p className="mt-2 text-2xl font-mono font-bold text-primary">{currentCard.code}</p>
+                {currentCard.label && <p className="mt-2 text-sm font-medium text-foreground">{currentCard.label}</p>}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="badge-pos badge-info">{currentCard.status ?? 'ACTIVE'}</span>
+                  {currentCardActivity?.summary.last_activity_at && (
+                    <span className="badge-pos">
+                      Ult. mov. {new Date(currentCardActivity.summary.last_activity_at).toLocaleString('es-CO')}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="card-pos p-4 text-center">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{formatCurrency(currentCard.balance)}</p>
+                </div>
+                <div className="card-pos p-4 text-center">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Puntos</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{currentCard.points.toLocaleString()}</p>
+                </div>
+                <div className="card-pos p-4 text-center">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Recargas</p>
+                  <p className="mt-2 text-xl font-bold text-foreground">{currentCardActivity?.summary.recharges_count ?? 0}</p>
+                </div>
+                <div className="card-pos p-4 text-center">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Juegos</p>
+                  <p className="mt-2 text-xl font-bold text-foreground">{currentCardActivity?.summary.uses_count ?? 0}</p>
+                </div>
+              </div>
             </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="card-pos p-4 text-center">
-                <p className="text-sm text-muted-foreground">Saldo Disponible</p>
-                <p className="text-2xl font-bold text-foreground">{formatCurrency(currentCard.balance)}</p>
-              </div>
-              <div className="card-pos p-4 text-center">
-                <p className="text-sm text-muted-foreground">Puntos Acumulados</p>
-                <p className="text-2xl font-bold text-foreground">{currentCard.points.toLocaleString()}</p>
-              </div>
-            </div>
-
-            {currentCard.bonusBalance > 0 && (
-              <div className="p-4 bg-secondary/60 border border-border rounded-xl text-center">
-                <p className="text-sm text-muted-foreground">Bono Disponible</p>
-                <p className="text-xl font-bold text-foreground">{formatCurrency(currentCard.bonusBalance)}</p>
-              </div>
-            )}
 
             {currentCard.owner && (
-              <div className="rounded-xl border border-border/60 bg-secondary/40 p-4 text-sm">
+              <div className="rounded-xl border border-border/60 bg-background/70 p-4 text-sm">
                 <p className="mb-1 font-semibold">Propietario</p>
                 <p>{currentCard.owner.full_name}</p>
-                <p className="text-muted-foreground">
-                  {currentCard.owner.document_type} {currentCard.owner.document_number}
-                </p>
+                <p className="text-muted-foreground">{currentCard.owner.document_type} {currentCard.owner.document_number}</p>
               </div>
             )}
+
+            <Tabs value={cardInfoTab} onValueChange={setCardInfoTab}>
+              <TabsList className="grid h-auto w-full grid-cols-4 gap-2 rounded-2xl bg-secondary/50 p-1">
+                <TabsTrigger value="overview">Resumen</TabsTrigger>
+                <TabsTrigger value="recharges">Recargas</TabsTrigger>
+                <TabsTrigger value="games">Maquinas</TabsTrigger>
+                <TabsTrigger value="prizes">Premios</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="overview" className="mt-4">
+                {isCurrentCardActivityLoading ? (
+                  <div className="rounded-xl border border-border/60 bg-secondary/20 p-6 text-sm text-muted-foreground">
+                    Cargando movimientos de la tarjeta...
+                  </div>
+                ) : (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="card-pos p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="font-semibold">Ultimos movimientos</p>
+                        <span className="text-xs text-muted-foreground">Saldo y puntos</span>
+                      </div>
+                      <div className="space-y-2">
+                        {(currentCardActivity?.balance_events ?? []).slice(0, 6).map((event) => (
+                          <div key={event.id} className="rounded-xl border border-border/50 bg-background/70 p-3 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium">{event.reason}</p>
+                                <p className="text-xs text-muted-foreground">{new Date(event.occurred_at).toLocaleString('es-CO')}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className={cn('font-semibold', Number(event.money_delta) >= 0 ? 'text-emerald-700' : 'text-rose-700')}>
+                                  {Number(event.money_delta) >= 0 ? '+' : ''}{formatCurrency(Number(event.money_delta))}
+                                </p>
+                                <p className={cn('text-xs font-medium', event.points_delta >= 0 ? 'text-sky-700' : 'text-amber-700')}>
+                                  {event.points_delta >= 0 ? '+' : ''}{event.points_delta} pts
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {(currentCardActivity?.balance_events ?? []).length === 0 && (
+                          <p className="text-sm text-muted-foreground">Sin movimientos recientes.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="card-pos p-4">
+                        <p className="mb-3 font-semibold">Ultima recarga</p>
+                        {currentCardActivity?.recharges[0] ? (
+                          <div className="text-sm">
+                            <p className="font-semibold">{formatCurrency(Number(currentCardActivity.recharges[0].amount))}</p>
+                            <p className="text-muted-foreground">{new Date(currentCardActivity.recharges[0].occurred_at).toLocaleString('es-CO')}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">Por {currentCardActivity.recharges[0].created_by}</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No tiene recargas registradas.</p>
+                        )}
+                      </div>
+                      <div className="card-pos p-4">
+                        <p className="mb-3 font-semibold">Ultimo juego</p>
+                        {currentCardActivity?.usages[0] ? (
+                          <div className="text-sm">
+                            <p className="font-semibold">{currentCardActivity.usages[0].attraction.name}</p>
+                            <p className="text-muted-foreground">{new Date(currentCardActivity.usages[0].occurred_at).toLocaleString('es-CO')}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">Costo {formatCurrency(Number(currentCardActivity.usages[0].cost))}</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No tiene usos de maquinas.</p>
+                        )}
+                      </div>
+                      <div className="card-pos p-4">
+                        <p className="mb-3 font-semibold">Ultimo premio</p>
+                        {currentCardActivity?.prize_redemptions[0] ? (
+                          <div className="text-sm">
+                            <p className="font-semibold">{currentCardActivity.prize_redemptions[0].item.name}</p>
+                            <p className="text-muted-foreground">{new Date(currentCardActivity.prize_redemptions[0].occurred_at).toLocaleString('es-CO')}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{currentCardActivity.prize_redemptions[0].points_total} pts</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No ha redimido premios.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="recharges" className="mt-4">
+                <div className="space-y-2">
+                  {(currentCardActivity?.recharges ?? []).map((entry) => (
+                    <div key={entry.sale_id} className="rounded-xl border border-border/60 bg-background/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{formatCurrency(Number(entry.amount))}</p>
+                          <p className="text-sm text-muted-foreground">{new Date(entry.occurred_at).toLocaleString('es-CO')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Recibo {entry.receipt_number ?? 'N/D'} · {entry.created_by}</p>
+                        </div>
+                        <div className="text-right text-xs text-muted-foreground">
+                          {entry.payments.map((payment, index) => (
+                            <p key={`${payment.method}-${index}`}>{payment.method} {formatCurrency(Number(payment.amount))}</p>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {(currentCardActivity?.recharges ?? []).length === 0 && (
+                    <p className="rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm text-muted-foreground">
+                      Esta tarjeta no tiene recargas registradas.
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="games" className="mt-4">
+                <div className="space-y-2">
+                  {(currentCardActivity?.usages ?? []).map((entry) => (
+                    <div key={entry.id} className="rounded-xl border border-border/60 bg-background/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{entry.attraction.name}</p>
+                          <p className="text-sm text-muted-foreground">{new Date(entry.occurred_at).toLocaleString('es-CO')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Lectora {entry.reader.code} · {entry.attraction.location ?? 'Ubicacion no definida'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{formatCurrency(Number(entry.cost))}</p>
+                          <p className="text-xs text-muted-foreground">{entry.type}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {(currentCardActivity?.usages ?? []).length === 0 && (
+                    <p className="rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm text-muted-foreground">
+                      Esta tarjeta no registra juegos o usos de maquinas.
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="prizes" className="mt-4">
+                <div className="space-y-2">
+                  {(currentCardActivity?.prize_redemptions ?? []).map((entry) => (
+                    <div key={entry.id} className="rounded-xl border border-border/60 bg-background/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{entry.item.name}</p>
+                          <p className="text-sm text-muted-foreground">{new Date(entry.occurred_at).toLocaleString('es-CO')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Cantidad {entry.quantity} · {entry.item.sku ?? 'Sin SKU'} · {entry.performed_by}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{entry.points_total.toLocaleString('es-CO')} pts</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {(currentCardActivity?.prize_redemptions ?? []).length === 0 && (
+                    <p className="rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm text-muted-foreground">
+                      Esta tarjeta no tiene premios redimidos.
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </POSModal>
@@ -2947,11 +3677,8 @@ export default function CashierDashboard() {
                   value={rewardCardUid}
                   onChange={(e) => setRewardCardUid(sanitizeTextInput(e.target.value.toUpperCase(), 60))}
                 />
-                <POSButton variant="secondary" onClick={waitUidForRewards}>
-                  Escanear
-                </POSButton>
-                <POSButton variant="primary" onClick={() => loadRewardCardSummary()} disabled={isRewardLoading}>
-                  {isRewardLoading ? 'Consultando...' : 'Consultar'}
+                <POSButton variant="secondary" onClick={waitUidForRewards} disabled={isRewardLoading}>
+                  {isRewardLoading ? 'Escaneando...' : 'Escanear'}
                 </POSButton>
               </div>
             </div>
@@ -3148,7 +3875,7 @@ export default function CashierDashboard() {
       {/* Modal Checkout */}
       <POSModal
         isOpen={showCheckout}
-        onClose={() => setShowCheckout(false)}
+        onClose={closeCheckoutModal}
         title="Finalizar Venta"
         size="full"
         overlayClassName="items-center px-2 py-2 md:px-4 md:py-4"
@@ -3158,7 +3885,7 @@ export default function CashierDashboard() {
         <div className="flex h-[80vh] flex-col">
           <div className="flex-1 overflow-y-auto px-6 pt-4 pb-4 md:px-8">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:gap-6">
-              <div className={cn('flex min-w-0 flex-col gap-4', checkoutStep === 'invoice' ? 'xl:col-span-4' : 'xl:col-span-6')}>
+              <div className="flex min-w-0 flex-col gap-4 xl:col-span-5">
                 <section className="rounded-2xl border border-border/50 bg-card/40 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="font-semibold">Resumen</h3>
@@ -3167,18 +3894,47 @@ export default function CashierDashboard() {
                   <div className="space-y-1 pr-1">
                     {cart.map(item => (
                       <div key={item.id} className="flex items-start justify-between gap-3 py-2 border-b border-border/40 last:border-0">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="font-medium truncate">{item.productName}</p>
                           <p className="text-sm text-muted-foreground">x{item.quantity}</p>
                         </div>
-                        <p className="font-medium shrink-0">{formatCurrency(item.total)}</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 rounded-lg border border-border/60 bg-background/70 px-1 py-1">
+                            <button
+                              type="button"
+                              className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-secondary"
+                              onClick={() => updateQuantity(item.id, -1)}
+                              title="Disminuir"
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </button>
+                            <span className="min-w-5 text-center text-sm font-semibold">{item.quantity}</span>
+                            <button
+                              type="button"
+                              className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-secondary"
+                              onClick={() => updateQuantity(item.id, 1)}
+                              title="Aumentar"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10"
+                            onClick={() => updateQuantity(item.id, -item.quantity)}
+                            title="Quitar producto"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                          <p className="font-medium shrink-0 min-w-[84px] text-right">{formatCurrency(item.total)}</p>
+                        </div>
                       </div>
                     ))}
                   </div>
                 </section>
               </div>
 
-              <div className={cn('flex min-w-0 flex-col gap-4', checkoutStep === 'invoice' ? 'xl:col-span-8' : 'xl:col-span-6')}>
+              <div className="flex min-w-0 flex-col gap-4 xl:col-span-7">
                 <section className="rounded-2xl border border-border/50 bg-card/40 p-4">
                   <label className="flex items-center justify-between gap-3">
                     <div>
@@ -3196,50 +3952,9 @@ export default function CashierDashboard() {
                   </label>
                 </section>
 
-                {requiresInvoice && (
-                  <section className="rounded-2xl border border-border/50 bg-card/40 p-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => dispatchCheckoutStep('GO_PAYMENT')}
-                        className={cn(
-                          'rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all',
-                          checkoutStep === 'payment'
-                            ? 'bg-primary text-primary-foreground ring-2 ring-primary/40'
-                            : 'bg-secondary/50 text-muted-foreground'
-                        )}
-                      >
-                        Paso 1: Pago
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => dispatchCheckoutStep('GO_INVOICE')}
-                        className={cn(
-                          'rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all',
-                          checkoutStep === 'invoice'
-                            ? 'bg-primary text-primary-foreground ring-2 ring-primary/40'
-                            : 'bg-secondary/50 text-muted-foreground'
-                        )}
-                      >
-                        Paso 2: Factura
-                      </button>
-                    </div>
-                  </section>
-                )}
-
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={checkoutStep}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.18, ease: 'easeOut' }}
-                  >
-                    {checkoutStep === 'payment' && renderPaymentStep()}
-                    {checkoutStep === 'cash_tender' && isCashCheckout && renderCashTenderStep()}
-                    {checkoutStep === 'invoice' && requiresInvoice && renderInvoiceStep()}
-                  </motion.div>
-                </AnimatePresence>
+                {checkoutStep === 'payment' && renderPaymentStep()}
+                {checkoutStep === 'invoice' && renderInvoiceStep()}
+                {checkoutStep === 'cash_tender' && renderCashTenderStep()}
               </div>
             </div>
           </div>
@@ -3249,83 +3964,32 @@ export default function CashierDashboard() {
               <span className="text-sm text-muted-foreground">TOTAL</span>
               <span className="text-money-xl text-success">{formatCurrency(total)}</span>
             </div>
-            <div className="mt-3 space-y-2">
-              {checkoutStep === 'payment' && isCashCheckout && (
+            <div className="mt-3 flex gap-2">
+              {checkoutStep !== 'payment' && (
                 <POSButton
-                  variant="primary"
+                  variant="secondary"
                   fullWidth
                   size="lg"
-                  onClick={() => dispatchCheckoutStep('GO_CASH_TENDER')}
+                  onClick={goBackCheckoutFlow}
                 >
-                  Continuar a Entrega en Efectivo
+                  Atrás
                 </POSButton>
               )}
-              {checkoutStep === 'payment' && !isCashCheckout && requiresInvoice && (
-                <POSButton
-                  variant="primary"
-                  fullWidth
-                  size="lg"
-                  disabled={!canProceedToInvoice}
-                  onClick={() => dispatchCheckoutStep('GO_INVOICE')}
-                >
-                  Continuar a Factura
-                </POSButton>
-              )}
-              {checkoutStep === 'payment' && !isCashCheckout && !requiresInvoice && (
-                <POSButton
-                  variant="success"
-                  fullWidth
-                  size="lg"
-                  disabled={!canSubmitCheckout}
-                  onClick={handleCheckout}
-                >
-                  Cobrar {formatCurrency(total)}
-                </POSButton>
-              )}
-              {checkoutStep === 'cash_tender' && isCashCheckout && (
-                <div className="grid grid-cols-2 gap-2">
-                  <POSButton
-                    variant="secondary"
-                    fullWidth
-                    size="lg"
-                    onClick={() => dispatchCheckoutStep('GO_PAYMENT')}
-                  >
-                    Volver
-                  </POSButton>
-                  {requiresInvoice ? (
-                    <POSButton
-                      variant="primary"
-                      fullWidth
-                      size="lg"
-                      disabled={!canProceedToInvoice}
-                      onClick={() => dispatchCheckoutStep('GO_INVOICE')}
-                    >
-                      Continuar a Factura
-                    </POSButton>
-                  ) : (
-                    <POSButton
-                      variant="success"
-                      fullWidth
-                      size="lg"
-                      disabled={!canSubmitCheckout}
-                      onClick={handleCheckout}
-                    >
-                      Cobrar {formatCurrency(total)}
-                    </POSButton>
-                  )}
-                </div>
-              )}
-              {checkoutStep === 'invoice' && (
-                <POSButton
-                  variant="success"
-                  fullWidth
-                  size="lg"
-                  disabled={!canSubmitCheckout}
-                  onClick={handleCheckout}
-                >
-                  Cobrar {formatCurrency(total)}
-                </POSButton>
-              )}
+              <POSButton
+                variant="success"
+                fullWidth
+                size="lg"
+                disabled={
+                  checkoutStep === 'cash_tender'
+                    ? !canSubmitCheckout
+                    : !canAdvanceFromPayment
+                }
+                onClick={checkoutStep === 'cash_tender' ? handleCheckout : continueCheckoutFlow}
+              >
+                {checkoutStep === 'cash_tender'
+                  ? `Cobrar ${formatCurrency(total)}`
+                  : 'Continuar'}
+              </POSButton>
             </div>
           </div>
         </div>
@@ -3336,115 +4000,125 @@ export default function CashierDashboard() {
         isOpen={showSalesHistory}
         onClose={() => setShowSalesHistory(false)}
         title="Historial de Ventas"
-        size="xl"
+        size="lg"
+        contentClassName="max-h-[88vh]"
+        bodyClassName="px-5 pt-3 pb-5 md:px-6 md:pt-3 md:pb-6"
       >
         <div className="space-y-3">
           <div className="rounded-xl border border-border/60 bg-card/50 p-3">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[200px] flex-1">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Fecha
-                </label>
-                <Popover open={isCashierRole ? false : salesHistoryCalendarOpen} onOpenChange={setSalesHistoryCalendarOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={isCashierRole}
-                      className="input-pos-compact flex h-10 w-full items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      <span>
-                        {new Date(`${(isCashierRole ? todayDate : salesHistoryDate) || todayDate}T00:00:00`).toLocaleDateString('es-CO', {
-                          weekday: 'short',
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
-                      </span>
-                      <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-auto rounded-xl border border-border/60 bg-background p-2 shadow-xl">
-                    <Calendar
-                      mode="single"
-                      selected={new Date(`${salesHistoryDate || todayDate}T00:00:00`)}
-                      onSelect={(date) => {
-                        if (!date) return;
-                        const nextDate = toDateInputValue(date);
-                        setSalesHistoryDate(nextDate);
-                        setSalesHistoryCalendarOpen(false);
-                        const siteId = getSiteIdStored();
-                        if (siteId) refreshRecentSales(siteId, nextDate);
-                      }}
-                      disabled={(date) => date > new Date(`${todayDate}T23:59:59`)}
-                      className="rounded-md"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
               {isCashierRole && (
                 <p className="text-xs text-muted-foreground">
                   El rol cajero solo puede consultar ventas del dia actual.
                 </p>
               )}
-              {!isCashierRole && (
-                <POSButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    const siteId = getSiteIdStored();
-                    if (siteId) refreshRecentSales(siteId, salesHistoryDate);
-                  }}
-                >
-                  Filtrar
-                </POSButton>
+              {isSupervisorView && (
+                <p className="text-xs text-muted-foreground">
+                  Supervisor puede consultar ventas de todo el historial.
+                </p>
               )}
+              <div className="ml-auto text-xs text-muted-foreground">
+                {salesHistoryTotal} transacciones
+              </div>
             </div>
           </div>
-          {recentSales.length === 0 && (
-            <div className="text-sm text-muted-foreground">No hay ventas recientes.</div>
+          {salesHistoryLoading && (
+            <div className="text-sm text-muted-foreground">Cargando historial...</div>
           )}
-          {recentSales.map((sale) => (
-            <div key={sale.id} className="flex items-center justify-between rounded-xl border border-border/60 bg-secondary/40 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-background p-2">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
+          <div className="max-h-[52vh] overflow-y-auto rounded-xl border border-border/60 bg-card/30 pr-1">
+            <div className="space-y-2 p-2">
+              {recentSales.length === 0 && (
+                <div className="p-3 text-sm text-muted-foreground">No hay ventas recientes.</div>
+              )}
+              {recentSales.slice(0, 10).map((sale) => (
+                <div key={sale.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="rounded-md bg-background p-1.5">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {sale.items.map((item) => item.product_name).join(', ')}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {new Date(sale.created_at).toLocaleString('es-CO')} • {sale.payment_method ?? 'N/A'}
+                        {sale.created_by?.full_name ? ` • ${sale.created_by.full_name}` : ''}
+                      </p>
+                      {sale.customer?.full_name && (
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {sale.customer.full_name} • {sale.requires_invoice ? 'Con factura' : 'Sin factura'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-sm font-bold">{formatCurrency(Number(sale.total))}</span>
+                    <POSButton
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openSaleEditor(sale)}
+                    >
+                      Ver
+                    </POSButton>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-medium">
-                    {sale.items.map((item) => item.product_name).join(', ')}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(sale.created_at).toLocaleString('es-CO')} • {sale.payment_method ?? 'N/A'}
-                  </p>
-                  {sale.customer?.full_name && (
-                    <p className="text-xs text-muted-foreground">
-                      {sale.customer.full_name} • {sale.requires_invoice ? 'Con factura' : 'Sin factura'}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-money font-bold">{formatCurrency(Number(sale.total))}</span>
-                <POSButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => openSaleEditor(sale)}
-                >
-                  Editar
-                </POSButton>
-              </div>
+              ))}
             </div>
-          ))}
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              Página {salesHistoryPage} de {salesHistoryTotalPages}
+            </p>
+            <div className="flex gap-2">
+              <POSButton
+                variant="secondary"
+                size="sm"
+                disabled={salesHistoryPage <= 1 || salesHistoryLoading}
+                onClick={() => {
+                  const siteId = getSiteIdStored();
+                  const nextPage = Math.max(1, salesHistoryPage - 1);
+                  setSalesHistoryPage(nextPage);
+                  if (siteId) loadSalesHistory(siteId, nextPage).catch(() => null);
+                }}
+              >
+                Anterior
+              </POSButton>
+              <POSButton
+                variant="secondary"
+                size="sm"
+                disabled={salesHistoryPage >= salesHistoryTotalPages || salesHistoryLoading}
+                onClick={() => {
+                  const siteId = getSiteIdStored();
+                  const nextPage = Math.min(salesHistoryTotalPages, salesHistoryPage + 1);
+                  setSalesHistoryPage(nextPage);
+                  if (siteId) loadSalesHistory(siteId, nextPage).catch(() => null);
+                }}
+              >
+                Siguiente
+              </POSButton>
+            </div>
+          </div>
         </div>
       </POSModal>
 
       <POSModal
         isOpen={showEditSaleModal}
-        onClose={() => setShowEditSaleModal(false)}
-        title="Editar venta"
+        onClose={() => {
+          setShowEditSaleModal(false);
+          setEditingSale(null);
+          setEditingSaleTotalInput('');
+          setEditingSaleReason('');
+          if (pendingPostSaleInvoice) setPendingPostSaleInvoice(false);
+        }}
+        title={pendingPostSaleInvoice ? 'Completar facturación' : 'Editar venta'}
         size="lg"
       >
         <div className="space-y-4">
+          <div className="rounded-xl border border-border/60 bg-card/40 p-3 text-sm text-muted-foreground">
+            {isCashierRole
+              ? 'Como cajero solo puedes corregir medio de pago, datos de facturación y reimprimir.'
+              : 'Como supervisor puedes corregir medio de pago, facturación, valor de ventas simples y anular transacciones.'}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-border/60 bg-card/50 p-3">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Medio de pago</p>
@@ -3473,6 +4147,30 @@ export default function CashierDashboard() {
             </label>
           </div>
 
+          {isSupervisorView && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Valor total</p>
+                <input
+                  className="input-pos-compact mt-2 h-11 w-full"
+                  placeholder="Total corregido"
+                  value={editingSaleTotalInput}
+                  onChange={(e) => setEditingSaleTotalInput(e.target.value.replace(/[^\d.]/g, '').slice(0, 12))}
+                  disabled={Boolean(editingSale?.items.some((item) => item.category === 'RECHARGE'))}
+                />
+              </div>
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Razón</p>
+                <input
+                  className="input-pos-compact mt-2 h-11 w-full"
+                  placeholder="Razón de corrección o anulación"
+                  value={editingSaleReason}
+                  onChange={(e) => setEditingSaleReason(sanitizeTextInput(e.target.value, 240))}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Select value={customerDocType} onValueChange={(value) => setCustomerDocType(value as typeof customerDocType)} disabled={!requiresInvoice}>
               <SelectTrigger className="input-pos-compact h-11 w-full">
@@ -3492,6 +4190,16 @@ export default function CashierDashboard() {
               value={customerDocNumber}
               onChange={(e) => setCustomerDocNumber(sanitizeTextInput(e.target.value, 40))}
             />
+            {requiresInvoice && isCustomerLookupLoading && (
+              <p className="col-span-2 -mt-1 text-[11px] text-muted-foreground">
+                Buscando cliente registrado. Espera un momento...
+              </p>
+            )}
+            {requiresInvoice && !isCustomerLookupLoading && customerLookupStatus === 'found' && (
+              <p className="col-span-2 -mt-1 text-[11px] font-medium text-emerald-700">
+                Cliente encontrado. Se completaron los datos registrados.
+              </p>
+            )}
             <input
               className="input-pos-compact h-11 w-full"
               placeholder="Nombre completo"
@@ -3529,14 +4237,28 @@ export default function CashierDashboard() {
             />
           </div>
 
-          <div className="flex gap-2">
-            <POSButton variant="secondary" fullWidth onClick={() => setShowEditSaleModal(false)}>
+          <div className="grid grid-cols-3 gap-2">
+            <POSButton variant="secondary" onClick={() => setShowEditSaleModal(false)}>
               Cancelar
             </POSButton>
-            <POSButton variant="success" fullWidth loading={editingSaleSaving} onClick={handleSaveSaleEdits}>
+            <POSButton variant="secondary" icon={Printer} onClick={() => handleReprintSale()}>
+              Reimprimir
+            </POSButton>
+            <POSButton variant="success" loading={editingSaleSaving} onClick={handleSaveSaleEdits}>
               Guardar cambios
             </POSButton>
           </div>
+          {isSupervisorView && editingSale && (
+            <div className="grid grid-cols-1 gap-2">
+              <POSButton
+                variant="danger"
+                loading={editingSaleSaving}
+                onClick={() => handleVoidSale(editingSale)}
+              >
+                {editingSale.items.some((item) => item.category === 'RECHARGE') ? 'Anular recarga' : 'Anular venta'}
+              </POSButton>
+            </div>
+          )}
         </div>
       </POSModal>
 
@@ -3775,12 +4497,15 @@ export default function CashierDashboard() {
               )}
             </div>
 
-            <textarea
-              className="input-pos-compact min-h-[108px] w-full py-3"
-              placeholder="Motivo del retiro parcial"
-              value={withdrawalReason}
-              onChange={(event) => setWithdrawalReason(sanitizeTextInput(event.target.value, 180))}
-            />
+            <div className="rounded-2xl border border-border/60 bg-card/60 p-3">
+              <p className="mb-2 text-sm font-semibold">Motivo del retiro</p>
+              <textarea
+                className="input-pos-compact min-h-[156px] w-full resize-none py-3"
+                placeholder="Describe el motivo del retiro parcial"
+                value={withdrawalReason}
+                onChange={(event) => setWithdrawalReason(sanitizeTextInput(event.target.value, 180))}
+              />
+            </div>
           </div>
 
           <div className="space-y-3 overflow-y-auto">

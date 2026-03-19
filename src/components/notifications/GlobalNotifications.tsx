@@ -46,11 +46,12 @@ export function GlobalNotifications() {
 
         const openedBy = payload.data?.opened_by_name || 'Usuario';
         const openingCash = payload.data?.opening_cash_amount ?? '0.00';
-        const terminal = payload.data?.terminal_id ? ` • Terminal ${payload.data.terminal_id}` : '';
 
         toast({
           title: 'Apertura de caja',
-          description: `${openedBy} abrió caja con $${openingCash}${terminal}`,
+          description: `${openedBy} abrió caja con $${openingCash}`,
+          className:
+            'border-slate-200 bg-white p-4 pr-8 text-slate-900 shadow-[0_10px_30px_rgba(15,23,42,0.12)] [&_[data-slot=toast-description]]:text-xs [&_[data-slot=toast-description]]:font-medium [&_[data-slot=toast-description]]:text-slate-600 [&_[data-slot=toast-title]]:text-[13px] [&_[data-slot=toast-title]]:font-semibold [&_[data-slot=toast-title]]:text-slate-900',
           duration: 6500,
         });
       } catch {

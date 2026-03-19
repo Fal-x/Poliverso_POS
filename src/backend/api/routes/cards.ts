@@ -20,6 +20,7 @@ import { evaluateRechargePromotion } from '@/backend/services/promotionEngine';
 import { appendCardBalanceEvent } from '@/backend/services/cardBalanceService';
 
 const latestReaderUidBySite = new Map<string, { uid: string; timestamp: number }>();
+const READER_UID_POLL_TOLERANCE_MS = 3000;
 
 function parseCardStatus(value: unknown): CardStatus | null {
   const status = sanitizeText(value, 20).toUpperCase();
@@ -134,7 +135,10 @@ export async function cardRoutes(app: FastifyInstance) {
     if (!event) {
       return ok(reply, { uid: null, timestamp: null });
     }
-    if (Number.isFinite(after) && after > 0 && event.timestamp <= after) {
+    const effectiveAfter = Number.isFinite(after) && after > 0
+      ? Math.max(0, after - READER_UID_POLL_TOLERANCE_MS)
+      : 0;
+    if (effectiveAfter > 0 && event.timestamp <= effectiveAfter) {
       return ok(reply, { uid: null, timestamp: null });
     }
     return ok(reply, { uid: event.uid, timestamp: event.timestamp });
@@ -381,6 +385,129 @@ export async function cardRoutes(app: FastifyInstance) {
     return ok(reply, mapCardToDto(card));
   });
 
+  app.get('/cards/:uid/activity-summary', { preHandler: [requireAuth, requireRole('cashier')] }, async (req, reply) => {
+    const uid = sanitizeId((req.params as any).uid, 60).toUpperCase();
+    const siteId = sanitizeUuid((req.query as any).site_id);
+    if (!uid || !siteId) return fail(reply, 'VALIDATION_ERROR', 'uid y site_id requeridos');
+
+    const card = await prisma.card.findFirst({
+      where: { uid, siteId },
+      include: { ownerCustomer: true },
+    });
+    if (!card) return fail(reply, 'NOT_FOUND', 'Tarjeta no encontrada', 404);
+
+    const [rechargeLines, usages, prizeRedemptions, balanceEvents] = await Promise.all([
+      prisma.saleLine.findMany({
+        where: { cardId: card.id, category: SaleCategory.RECHARGE, sale: { siteId } },
+        include: {
+          sale: {
+            select: {
+              id: true,
+              createdAt: true,
+              receiptNumber: true,
+              status: true,
+              createdBy: { select: { fullName: true, email: true } },
+              payments: { select: { method: true, amount: true } },
+            },
+          },
+        },
+        orderBy: { sale: { createdAt: 'desc' } },
+        take: 20,
+      }),
+      prisma.attractionUsage.findMany({
+        where: { siteId, cardId: card.id },
+        include: {
+          attraction: { select: { id: true, code: true, name: true, type: true, location: true } },
+          reader: { select: { id: true, code: true, position: true } },
+          performedBy: { select: { fullName: true, email: true } },
+        },
+        orderBy: { occurredAt: 'desc' },
+        take: 20,
+      }),
+      prisma.prizeRedemption.findMany({
+        where: { siteId, cardId: card.id },
+        include: {
+          item: { select: { id: true, name: true, sku: true } },
+          performedBy: { select: { fullName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      prisma.cardBalanceEvent.findMany({
+        where: { siteId, cardId: card.id },
+        orderBy: { occurredAt: 'desc' },
+        take: 25,
+      }),
+    ]);
+
+    return ok(reply, {
+      card: mapCardToDto(card),
+      summary: {
+        recharges_count: rechargeLines.length,
+        uses_count: usages.length,
+        redemptions_count: prizeRedemptions.length,
+        last_activity_at: [
+          rechargeLines[0]?.sale.createdAt,
+          usages[0]?.occurredAt,
+          prizeRedemptions[0]?.createdAt,
+          balanceEvents[0]?.occurredAt,
+        ]
+          .filter(Boolean)
+          .sort((left, right) => right!.getTime() - left!.getTime())[0]?.toISOString() ?? null,
+      },
+      recharges: rechargeLines.map((line) => ({
+        sale_id: line.sale.id,
+        occurred_at: line.sale.createdAt.toISOString(),
+        receipt_number: line.sale.receiptNumber,
+        sale_status: line.sale.status,
+        amount: line.lineTotal.toFixed(2),
+        payments: line.sale.payments.map((payment) => ({
+          method: payment.method,
+          amount: payment.amount.toFixed(2),
+        })),
+        created_by: line.sale.createdBy.fullName || line.sale.createdBy.email,
+      })),
+      usages: usages.map((usage) => ({
+        id: usage.id.toString(),
+        type: usage.type,
+        cost: usage.cost.toFixed(2),
+        occurred_at: usage.occurredAt.toISOString(),
+        attraction: {
+          id: usage.attraction.id,
+          code: usage.attraction.code,
+          name: usage.attraction.name,
+          type: usage.attraction.type,
+          location: usage.attraction.location,
+        },
+        reader: {
+          id: usage.reader.id,
+          code: usage.reader.code,
+          position: usage.reader.position,
+        },
+        performed_by: usage.performedBy ? (usage.performedBy.fullName || usage.performedBy.email) : null,
+      })),
+      prize_redemptions: prizeRedemptions.map((redemption) => ({
+        id: redemption.id,
+        occurred_at: redemption.createdAt.toISOString(),
+        quantity: redemption.quantity,
+        points_total: redemption.pointsTotal,
+        item: {
+          id: redemption.item.id,
+          name: redemption.item.name,
+          sku: redemption.item.sku,
+        },
+        performed_by: redemption.performedBy.fullName || redemption.performedBy.email,
+      })),
+      balance_events: balanceEvents.map((event) => ({
+        id: event.id,
+        occurred_at: event.occurredAt.toISOString(),
+        money_delta: event.moneyDelta.toFixed(2),
+        points_delta: event.pointsDelta,
+        reason: event.reason,
+      })),
+    });
+  });
+
   app.get('/cards/:uid/status-history', { preHandler: [requireAuth, requireRole('supervisor')] }, async (req, reply) => {
     const uid = sanitizeId((req.params as any).uid, 60).toUpperCase();
     const siteId = sanitizeUuid((req.query as any).site_id);
@@ -448,6 +575,7 @@ export async function cardRoutes(app: FastifyInstance) {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const metadata = (body?.metadata ?? null) as Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
       const cardUpdated = await tx.card.update({
         where: { id: card.id },
         data: { status: toStatus },
@@ -460,7 +588,7 @@ export async function cardRoutes(app: FastifyInstance) {
           toStatus,
           reason,
           changedByUserId,
-          metadata: body?.metadata ?? null,
+          metadata,
         },
       });
       return cardUpdated;
