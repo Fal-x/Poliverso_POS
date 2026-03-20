@@ -1,10 +1,8 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
-import { resolveApiBaseUrl } from '@/api/baseUrl';
+import { resolveApiUrl } from '@/api/baseUrl';
 import { getAccessToken, getAuthUser, getSiteIdStored } from '@/lib/auth';
-
-const API_URL = resolveApiBaseUrl();
 
 type StreamEvent = {
   type: 'cash_session_opened' | 'cash_threshold_alert';
@@ -33,7 +31,7 @@ export function GlobalNotifications() {
       return;
     }
 
-    const url = new URL(`${API_URL}/notifications/stream`);
+    const url = new URL(resolveApiUrl('/notifications/stream'));
     url.searchParams.set('site_id', siteId);
     url.searchParams.set('token', token);
 

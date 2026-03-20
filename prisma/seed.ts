@@ -105,6 +105,42 @@ async function audit(args: {
   });
 }
 
+type EnrollmentPaymentSeed = {
+  amount: Prisma.Decimal;
+  method: PaymentMethod;
+  createdAt: Date;
+  createdById: string;
+  notes?: string | null;
+};
+
+type EnrollmentSeed = {
+  programName: string;
+  groupName: string;
+  startsAt: Date;
+  endsAt: Date;
+  dueDate: Date;
+  totalAmount: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  finalAmount: Prisma.Decimal;
+  payments: EnrollmentPaymentSeed[];
+  statusOverride?: ServiceStatus;
+};
+
+type PolikidSeed = {
+  firstName: string;
+  lastName: string;
+  documentType: CustomerDocumentType;
+  documentNumber: string;
+  birthDate: Date;
+  phone: string;
+  email?: string | null;
+  guardianName: string;
+  guardianPhone: string;
+  status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "WITHDRAWN";
+  notes?: string | null;
+  enrollments: EnrollmentSeed[];
+};
+
 // ---------- Seed ----------
 async function main() {
   // 1) Organization + Site + Config
@@ -794,7 +830,7 @@ async function main() {
         nombre: p.name,
         tipoOperacion: TipoOperacionVendible.PRODUCTO,
         tieneInventario: [SaleCategory.CARD_PLASTIC, SaleCategory.GIFT_CARD, SaleCategory.SNACKS, SaleCategory.PRIZE].includes(p.category),
-        usaSaldoElectronico: p.category === SaleCategory.RECHARGE,
+        usaSaldoElectronico: false,
         usaPuntos: false,
         precioBase: p.price,
         activo: true,
@@ -807,7 +843,7 @@ async function main() {
         nombre: p.name,
         tipoOperacion: TipoOperacionVendible.PRODUCTO,
         tieneInventario: [SaleCategory.CARD_PLASTIC, SaleCategory.GIFT_CARD, SaleCategory.SNACKS, SaleCategory.PRIZE].includes(p.category),
-        usaSaldoElectronico: p.category === SaleCategory.RECHARGE,
+        usaSaldoElectronico: false,
         usaPuntos: false,
         precioBase: p.price,
         activo: true,
@@ -952,7 +988,7 @@ async function main() {
   });
 
   // 12.5) POLIKid demo: estudiantes, inscripciones y abonos para poblar cartera/programas
-  const polikidsSeed = [
+  const polikidsSeed: PolikidSeed[] = [
     {
       firstName: "Sofia",
       lastName: "Mejia",

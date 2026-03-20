@@ -26,3 +26,10 @@ export function resolveApiBaseUrl(): string {
 
   return configured;
 }
+
+export function resolveApiUrl(path = ''): string {
+  const baseUrl = resolveApiBaseUrl();
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return new URL(normalizedPath, new URL(normalizedBase, window.location.origin)).toString();
+}
